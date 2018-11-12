@@ -1,0 +1,5 @@
+# $FreeBSD$
+
+SUBDIR+=	sdiotool
+
+# end
