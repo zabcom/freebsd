@@ -348,7 +348,7 @@ sdio_func_read_cis(struct cam_device *dev, uint8_t func_number,
 		}
 		tuple_len = sdio_read_1(dev, 0, addr++, &ret);
 		if (tuple_len == 0 && tuple_id != 0x00) {
-			warn("Parse error: 0-length tuple %02X\n", tuple_id);
+			warn("Parse error: 0-length tuple %#02x\n", tuple_id);
 			return -1;
 		}
 
@@ -358,7 +358,7 @@ sdio_func_read_cis(struct cam_device *dev, uint8_t func_number,
 			for (count = 0, start = 0, i = 0;
 			     (count < 4) && ((i + 4) < 256); i++) {
 				ch = sdio_read_1(dev, 0, addr + i, &ret);
-				printf("count=%d, start=%d, i=%d, Got %c (0x%02x)\n", count, start, i, ch, ch);
+				printf("count=%d, start=%d, i=%d, Got %c (%#02x)\n", count, start, i, ch, ch);
 				if (ch == 0xff)
 					break;
 				cis1_info_buf[i] = ch;
@@ -401,7 +401,7 @@ sdio_func_read_cis(struct cam_device *dev, uint8_t func_number,
 			}
 			break;
 		default:
-			warnx("Skipping tuple ID %02X len %02X\n", tuple_id, tuple_len);
+			warnx("Skipping tuple ID %#02x len %#02x\n", tuple_id, tuple_len);
 		}
 		cis_addr += tuple_len + 2;
 		tuple_count++;
@@ -420,7 +420,7 @@ sdio_get_common_cis_addr(struct cam_device *dev) {
 	addr |= sdio_read_1(dev, 0, SD_IO_CCCR_CISPTR + 2, &ret) << 16;
 
 	if (addr < SD_IO_CIS_START || addr > SD_IO_CIS_START + SD_IO_CIS_SIZE) {
-		warn("Bad CIS address: %04X\n", addr);
+		warn("Bad CIS address: %#04x\n", addr);
 		addr = 0;
 	}
 

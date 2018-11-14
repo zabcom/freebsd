@@ -244,7 +244,7 @@ static int brcmf_sdiod_request_data(struct brcmf_sdio_dev *sdiodev, u8 fn, u32 a
 	struct sdio_func *func;
 	int ret = -EINVAL;
 
-	brcmf_dbg(SDIO, "rw=%d, func=%d, addr=0x%05x, nbytes=%d\n",
+	brcmf_dbg(SDIO, "rw=%d, func=%d, addr=%#05x, nbytes=%d\n",
 		  write, fn, addr, regsz);
 
 	/* only allow byte access on F0 */
@@ -285,7 +285,7 @@ static int brcmf_sdiod_request_data(struct brcmf_sdio_dev *sdiodev, u8 fn, u32 a
 	}
 
 	if (ret)
-		brcmf_dbg(SDIO, "failed to %s data F%d@0x%05x, err: %d\n",
+		brcmf_dbg(SDIO, "failed to %s data F%d@%#05x, err: %d\n",
 			  write ? "write" : "read", fn, addr, ret);
 
 	return ret;
@@ -352,10 +352,10 @@ static int brcmf_sdiod_regrw_helper(struct brcmf_sdio_dev *sdiodev, u32 addr, u8
 		 * in the logs.
 		 */
 		if (addr != SBSDIO_FUNC1_SLEEPCSR)
-			brcmf_err("failed to %s data F%d@0x%05x, err: %d\n",
+			brcmf_err("failed to %s data F%d@%#05x, err: %d\n",
 				  write ? "write" : "read", func, addr, ret);
 		else
-			brcmf_dbg(SDIO, "failed to %s data F%d@0x%05x, err: %d\n",
+			brcmf_dbg(SDIO, "failed to %s data F%d@%#05x, err: %d\n",
 				  write ? "write" : "read", func, addr, ret);
 	}
 	return ret;
@@ -393,13 +393,13 @@ u32 brcmf_sdiod_regrl(struct brcmf_sdio_dev *sdiodev, u32 addr, int *ret)
 	u32 data = 0;
 	int retval;
 
-	brcmf_dbg(SDIO, "addr:0x%08x\n", addr);
+	brcmf_dbg(SDIO, "addr:%#08x\n", addr);
 	retval = brcmf_sdiod_addrprep(sdiodev, sizeof(data), &addr);
 	if (retval)
 		goto done;
 	retval = brcmf_sdiod_regrw_helper(sdiodev, addr, sizeof(data), &data,
 					  false);
-	brcmf_dbg(SDIO, "data:0x%08x\n", data);
+	brcmf_dbg(SDIO, "data:%#08x\n", data);
 
 done:
 	if (ret)
@@ -417,11 +417,11 @@ probe_bcrm(struct cam_device *dev) {
 
 	sdio_card_set_bus_width(dev, bus_width_4);
 	cis_addr = sdio_get_common_cis_addr(dev);
-	printf("CIS address: %04X\n", cis_addr);
+	printf("CIS address: %#04x\n", cis_addr);
 
 	memset(&info, 0, sizeof(info));
 	sdio_func_read_cis(dev, 0, cis_addr, &info);
-	printf("Vendor 0x%04X product 0x%04X\n", info.man_id, info.prod_id);
+	printf("Vendor %#04x product %#04x\n", info.man_id, info.prod_id);
 }
 
 __unused static uint8_t*
@@ -468,7 +468,7 @@ get_sdio_card_info(struct cam_device *dev, struct card_info *ci) {
 
 	memset(ci, 0, sizeof(struct card_info));
 	sdio_func_read_cis(dev, 0, cis_addr, &ci->f[0]);
-	printf("F0: Vendor 0x%04X product 0x%04X max block size %d bytes\n",
+	printf("F0: Vendor %#04x product %#04x max block size %d bytes\n",
 	       ci->f[0].man_id, ci->f[0].prod_id, ci->f[0].max_block_size);
 	for (int i = 1; i <= 7; i++) {
 		fbr_addr = SD_IO_FBR_START * i + 0x9;
@@ -476,7 +476,7 @@ get_sdio_card_info(struct cam_device *dev, struct card_info *ci) {
 		cis_addr |= sdio_read_1(dev, 0, fbr_addr++, &ret) << 8;
 		cis_addr |= sdio_read_1(dev, 0, fbr_addr++, &ret) << 16;
 		sdio_func_read_cis(dev, i, cis_addr, &ci->f[i]);
-		printf("F%d: Vendor 0x%04X product 0x%04X max block size %d bytes\n",
+		printf("F%d: Vendor %#04x product %#04 max block size %d bytes\n",
 		       i, ci->f[i].man_id, ci->f[i].prod_id, ci->f[i].max_block_size);
 		if (ci->f[i].man_id == 0) {
 			printf("F%d doesn't exist\n", i);
@@ -547,9 +547,9 @@ main(int argc, char **argv) {
 
 	ret = sdio_func_enable(cam_dev, 1, 1);bailout(ret);
 	uint32_t magic = brcmf_sdiod_regrl(&brcmf_dev, 0x18000000, &ret);
-	printf("Magic = %08x\n", magic);
+	printf("Magic = %#08x\n", magic);
 	if (magic != REPLY_MAGIC) {
-		errx(1, "Reply magic is incorrect: expected %08x, got %08x",
+		errx(1, "Reply magic is incorrect: expected %#08x, got %#08x",
 		     REPLY_MAGIC, magic);
 	}
 	cam_close_spec_device(cam_dev);
