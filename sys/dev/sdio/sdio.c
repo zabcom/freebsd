@@ -53,6 +53,14 @@ __FBSDID("$FreeBSD$");
 #include "sdio_subr.h"
 #include "opt_cam.h"
 
+#ifdef DEBUG
+#define	DPRINTF(...)		printf(__VA_ARGS__)
+#define	DPRINTFDEV(_dev, ...)	device_printf((_dev), __VA_ARGS__)
+#else
+#define	DPRINTF(...)
+#define	DPRINTFDEV(...)
+#endif
+
 struct sdio_softc {
 	device_t dev;
 	device_t card_dev;
@@ -82,17 +90,16 @@ static	periph_start_t	sdiostart;
 static	periph_oninv_t	sdiooninvalidate;
 
 static void sdio_identify(driver_t *, device_t);
-static void sdio_real_identify(driver_t *driver,
-			       device_t parent,
-			       struct sdio_softc *sc);
+static void sdio_real_identify(driver_t *driver, device_t parent,
+    struct sdio_softc *sc);
 static int  sdio_probe(device_t);
 static int  sdio_attach(device_t);
 static int  sdio_detach(device_t);
 static int  sdio_read_ivar(device_t dev, device_t child, int index,
-			  uintptr_t *result);
+    uintptr_t *result);
 
 static void  sdioasync(void *callback_arg, u_int32_t code,
-		       struct cam_path *path, void *arg);
+    struct cam_path *path, void *arg);
 
 static void  sdio_start_init_task(void *context, int pending);
 
@@ -110,10 +117,10 @@ static MALLOC_DEFINE(M_SDIO, "sdio", "sdio buffers");
 
 static device_method_t sdio_methods[] = {
 	/* Device interface */
-	DEVMETHOD(device_identify,      sdio_identify),
-	DEVMETHOD(device_probe,         sdio_probe),
-	DEVMETHOD(device_attach,        sdio_attach),
-	DEVMETHOD(device_detach,        sdio_detach),
+	DEVMETHOD(device_identify,	sdio_identify),
+	DEVMETHOD(device_probe,		sdio_probe),
+	DEVMETHOD(device_attach,	sdio_attach),
+	DEVMETHOD(device_detach,	sdio_detach),
 
 	/* bus interface */
 	DEVMETHOD(bus_setup_intr,	bus_generic_setup_intr),
@@ -144,16 +151,15 @@ static void
 sdioinit(void)
 {
 	cam_status status;
+
 	/*
 	 * Install a global async callback.  This callback will
 	 * receive async callbacks like "new device found".
 	 */
 	status = xpt_register_async(AC_FOUND_DEVICE, sdioasync, NULL, NULL);
-
-	if (status != CAM_REQ_CMP) {
-		printf("sdio: Failed to attach master async callback "
-		       "due to status 0x%x!\n", status);
-	}
+	if (status != CAM_REQ_CMP)
+		printf("%s: Failed to attach master async callback "
+		    "due to status 0x%x!\n", __func__, status);
 }
 
 /* This function should just exist to allow unloading the KLD */
@@ -162,11 +168,11 @@ sdiodeinit(void)
 {
 	struct cam_periph *periph, *periph_temp;
 
-	printf("CAM is calling sdiodeinit()\n");
+	DPRINTF("CAM is calling %s()\n", __func__);
 	/* Walk through all instances and invalidate them manually */
 	TAILQ_FOREACH_SAFE(periph, &sdiodriver.units, unit_links, periph_temp) {
 		cam_periph_lock(periph);
-		printf("Invalidating %s\n", periph->periph_name);
+		DPRINTF("%s: invalidating %s\n", __func__, periph->periph_name);
 		cam_periph_invalidate(periph);
 	}
 	return (0);
@@ -181,16 +187,14 @@ sdioregister(struct cam_periph *periph, void *arg)
 	CAM_DEBUG(periph->path, CAM_DEBUG_TRACE, ("sdioregister\n"));
 	cgd = (struct ccb_getdev *)arg;
 	if (cgd == NULL) {
-		printf("sdioregister: no getdev CCB, can't register device\n");
+		printf("%s: no getdev CCB, can't register device\n", __func__);
 		return(CAM_REQ_CMP_ERR);
 	}
 
-	softc = (struct sdio_softc *)malloc(sizeof(*softc), M_DEVBUF,
-					    M_NOWAIT|M_ZERO);
-
+	softc = (struct sdio_softc *) malloc(sizeof(*softc), M_DEVBUF,
+	    M_NOWAIT|M_ZERO);
 	if (softc == NULL) {
-		printf("sdioregister: Unable to probe new device. "
-		       "Unable to allocate softc\n");
+		printf("%s: unable to allocate softc\n", __func__);
 		return (CAM_REQ_CMP_ERR);
 	}
 
@@ -202,54 +206,53 @@ sdioregister(struct cam_periph *periph, void *arg)
 	periph->softc = softc;
 
 	xpt_schedule(periph, CAM_PRIORITY_XPT);
+
 	return (CAM_REQ_CMP);
 }
 
 static void
-sdioasync(void *callback_arg, u_int32_t code,
-	struct cam_path *path, void *arg)
+sdioasync(void *callback_arg, u_int32_t code, struct cam_path *path, void *arg)
 {
 	struct cam_periph *periph;
-	__unused struct sdio_softc *softc;
 
 	periph = (struct cam_periph *)callback_arg;
 	CAM_DEBUG(path, CAM_DEBUG_TRACE, ("sdioasync(code=%d)\n", code));
 	switch (code) {
-	case AC_FOUND_DEVICE: {
+	case AC_FOUND_DEVICE:
+	{
 		struct ccb_getdev *cgd;
 		cam_status status;
 
 		cgd = (struct ccb_getdev *)arg;
 		if (cgd == NULL)
 			break;
-
 		if (cgd->protocol != PROTO_MMCSD)
 			break;
 
-		/* We support only SDIO cards without memory portion */
-		if ((path->device->mmc_ident_data.card_features & CARD_FEATURE_MEMORY)) {
-			CAM_DEBUG(path, CAM_DEBUG_TRACE, ("Memory card, not interested\n"));
+		/* We support only SDIO cards without memory portion. */
+		if ((path->device->mmc_ident_data.card_features &
+		    CARD_FEATURE_MEMORY)) {
+			CAM_DEBUG(path, CAM_DEBUG_TRACE,
+			     ("Memory card, not interested\n"));
 			break;
 		}
 
 		/*
-		 * Allocate a peripheral instance for
-		 * this device and start the probe
-		 * process.
+		 * Allocate a peripheral instance for this device and start
+		 * the probe process.
 		 */
 		status = cam_periph_alloc(sdioregister, sdiooninvalidate,
-					  sdiocleanup, sdiostart,
-					  "sdio", CAM_PERIPH_BIO,
-					  path, sdioasync,
-					  AC_FOUND_DEVICE, cgd);
-
-		if (status != CAM_REQ_CMP
-		    && status != CAM_REQ_INPROG)
-			CAM_DEBUG(path, CAM_DEBUG_PERIPH, ("sdioasync: Unable to attach to new device due to status 0x%x\n", status));
+		    sdiocleanup, sdiostart, "sdio", CAM_PERIPH_BIO, path,
+		    sdioasync, AC_FOUND_DEVICE, cgd);
+		if (status != CAM_REQ_CMP && status != CAM_REQ_INPROG)
+			CAM_DEBUG(path, CAM_DEBUG_PERIPH,
+			     ("%s: Unable to attach to new device due to "
+			     "status %#02x\n", __func__, status));
 		break;
 	}
 	default:
-		CAM_DEBUG(path, CAM_DEBUG_PERIPH, ("Cannot handle async code 0x%02x\n", code));
+		CAM_DEBUG(path, CAM_DEBUG_PERIPH,
+		     ("Cannot handle async code %#02x\n", code));
 		cam_periph_async(periph, code, path, arg);
 		break;
 	}
@@ -262,11 +265,9 @@ sdiooninvalidate(struct cam_periph *periph)
 
 	softc = (struct sdio_softc *)periph->softc;
 
-	CAM_DEBUG(periph->path, CAM_DEBUG_TRACE, ("sdiooninvalidate\n"));
+	CAM_DEBUG(periph->path, CAM_DEBUG_TRACE, ("%s\n", __func__));
 
-	/*
-	 * De-register any async callbacks.
-	 */
+	/* De-register any async callbacks. */
 	xpt_register_async(0, sdioasync, periph, periph->path);
 }
 
@@ -275,12 +276,12 @@ sdiocleanup(struct cam_periph *periph)
 {
 	struct sdio_softc *softc;
 
-	CAM_DEBUG(periph->path, CAM_DEBUG_TRACE, ("sdiocleanup\n"));
+	CAM_DEBUG(periph->path, CAM_DEBUG_TRACE, ("%s\n", __func__));
 	softc = (struct sdio_softc *)periph->softc;
 	/*
-	 * If newbus deallocation code has already run, destroy softc
-	 * Otherwise just mark CAM as detached so that newbus detach
-	 * is allowed to release the memory.
+	 * If newbus deallocation code has already run, destroy the softc.
+	 * Otherwise just mark CAM as detached so that newbus detach is
+	 * allowed to release the memory.
 	 */
 	if (!softc->is_newbus_attached)
 		free(softc, M_DEVBUF);
@@ -290,28 +291,29 @@ sdiocleanup(struct cam_periph *periph)
 }
 
 static void
-sdio_start_init_task(void *context, int pending) {
+sdio_start_init_task(void *context, int pending)
+{
 	union ccb *new_ccb;
 	struct cam_periph *periph;
 	struct sdio_softc *softc;
 
 	periph = (struct cam_periph *)context;
 	softc = (struct sdio_softc *)periph->softc;
-	CAM_DEBUG(periph->path, CAM_DEBUG_TRACE, ("sdio_start_init_task\n"));
-	/* periph was held for us when this task was enqueued */
+	CAM_DEBUG(periph->path, CAM_DEBUG_TRACE, ("%s\n", __func__));
+	/* Periph was held for us when this task was enqueued. */
 	if ((periph->flags & CAM_PERIPH_INVALID) != 0) {
 		cam_periph_release(periph);
 		return;
 	}
 	new_ccb = xpt_alloc_ccb();
-	xpt_setup_ccb(&new_ccb->ccb_h, periph->path,
-		      CAM_PRIORITY_NONE);
+	xpt_setup_ccb(&new_ccb->ccb_h, periph->path, CAM_PRIORITY_NONE);
 
 	cam_periph_lock(periph);
 
 	/*
 	 * Read CCCR and FBR of each function, get manufacturer and device IDs,
-	 * max block size, possibly more information like this that might be useful
+	 * max block size, possibly more information like this that might be
+	 * useful.
 	 */
 	get_sdio_card_info(new_ccb, &softc->cinfo);
 
@@ -330,16 +332,16 @@ sdio_start_init_task(void *context, int pending) {
 static void
 sdiostart(struct cam_periph *periph, union ccb *start_ccb)
 {
-	struct sdio_softc *softc = (struct sdio_softc *)periph->softc;
-	CAM_DEBUG(periph->path, CAM_DEBUG_TRACE, ("sdiostart\n"));
+	struct sdio_softc *softc;
+
+	softc = (struct sdio_softc *)periph->softc;
+	CAM_DEBUG(periph->path, CAM_DEBUG_TRACE, ("%s\n", __func__));
 
 	if (softc->state == SDIO_STATE_INIT) {
-		/* Make initialization */
+		/* Make initialization. */
 		taskqueue_enqueue(taskqueue_thread, &softc->start_init_task);
-		xpt_release_ccb(start_ccb);
-	} else
-		xpt_release_ccb(start_ccb);
-	return;
+	}
+	xpt_release_ccb(start_ccb);
 }
 
 /*
@@ -358,32 +360,35 @@ sdiostart(struct cam_periph *periph, union ccb *start_ccb)
 static void
 sdio_identify(driver_t *driver, device_t parent)
 {
-	device_printf(parent, "sdio_identify() called\n");
+
+	device_printf(parent, "%s() called\n", __func__);
 }
 
 static void
-sdio_real_identify(driver_t *driver, device_t parent, struct sdio_softc *sc) {
+sdio_real_identify(driver_t *driver, device_t parent, struct sdio_softc *sc)
+{
 	device_t child;
 	int ret;
 
 	if (resource_disabled("sdio", 0))
 		return;
 
-	device_printf(parent, "sdio_real_identify() called\n");
+	DPRINTFDEV(parent, "%s() called\n", __func__);
 	/* Avoid duplicates. */
 	if (device_find_child(parent, "sdio", -1)) {
-		device_printf(parent, "sdio_identify(): there is already a child\n");
+		device_printf(parent, "%s(): there is already a child\n",
+		    __func__);
 		return;
 	}
 
 	child = BUS_ADD_CHILD(parent, 20, "sdio", 0);
 	if (child == NULL) {
-		device_printf(parent, "add SDIO child failed\n");
+		device_printf(parent, "%s: add SDIO child failed\n", __func__);
 		return;
 	}
 
-	device_printf(parent, "BUS_ADD_CHILD() finished, child=%s\n",
-		      device_get_nameunit(child));
+	DPRINTFDEV(parent, "%s: BUS_ADD_CHILD() finished, child=%s\n",
+	    __func__, device_get_nameunit(child));
 
 	device_set_desc(child, "SDIO bus");
 
@@ -394,7 +399,8 @@ sdio_real_identify(driver_t *driver, device_t parent, struct sdio_softc *sc) {
 	ret = device_probe_and_attach(child);
 	mtx_unlock(&Giant);
 	if (ret != 0)
-		device_printf(child, "attach() failed, ret=%d", ret);
+		device_printf(child, "%s: child %p attach() failed, ret=%d",
+		    __func__, child, ret);
 	/*
 	 * Now attach() has returned, so we can fill in the softc.
 	 * We use device_set_softc() which sets a flag DF_EXTERNALSOFTC
@@ -417,7 +423,9 @@ sdio_real_identify(driver_t *driver, device_t parent, struct sdio_softc *sc) {
 static int
 sdio_probe(device_t dev)
 {
-	device_printf(dev, "SDIO probe() called\n");
+
+	DPRINTFDEV(dev, "%s: called\n", __func__);
+	/* XXX-BZ not in probe but in attach, right? */
 	device_set_desc(dev, "SDIO bus");
 	return (BUS_PROBE_DEFAULT);
 }
@@ -425,7 +433,8 @@ sdio_probe(device_t dev)
 static int
 sdio_attach(device_t dev)
 {
-	device_printf(dev, "attached OK\n");
+
+	DPRINTFDEV(dev, "%s: attached OK\n", __func__);
 	return (0);
 }
 
@@ -437,14 +446,14 @@ sdio_detach(device_t dev)
 
 	sc = device_get_softc(dev);
 	ret = device_delete_child(dev, sc->card_dev);
-	if (ret != 0) {
-		device_printf(dev, "Cannot detach child device %s: %d",
-			      device_get_nameunit(sc->card_dev), ret);
-	}
+	if (ret != 0)
+		device_printf(dev, "%s: Cannot detach child device %s: %d",
+		    __func__, device_get_nameunit(sc->card_dev), ret);
+	/* XXX-BZ and now what? return error? */
 	sc->is_newbus_attached = 0;
 	if (!sc->is_cam_attached)
 		free(sc, M_DEVBUF);
-	device_printf(dev, "detached OK\n");
+	DPRINTFDEV(dev, "%s: detached OK\n", __func__);
 	return (0);
 
 	/*
@@ -467,12 +476,13 @@ sdio_detach(device_t dev)
 }
 
 static int
-sdio_read_ivar(device_t dev, device_t child, int index,
-	       uintptr_t *result) {
+sdio_read_ivar(device_t dev, device_t child, int index, uintptr_t *result)
+{
 
-	device_printf(dev, "sdio_read_ivar(me, %s, %d)\n",
-		      device_get_nameunit(child),
-		      index);
+	DPRINTFDEV(dev, "%s(%p, %s, %d)\n", __func__, dev,
+	    device_get_nameunit(child), index);
+	KASSERT((result != NULL), ("%s: result pass as NULL\n", __func__));
+
 	switch (index) {
 	case SDIO_IVAR_VENDOR_ID:
 		*result = (int) 0xDEADBEEF;

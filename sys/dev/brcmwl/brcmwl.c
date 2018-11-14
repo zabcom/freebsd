@@ -51,9 +51,6 @@ static int	brcmwl_probe(device_t dev);
 static int	brcmwl_attach(device_t dev);
 static int	brcmwl_detach(device_t dev);
 
-/*
- * XXX Do we need to implement device_identify()?
- */
 static int
 brcmwl_probe(device_t dev)
 {
