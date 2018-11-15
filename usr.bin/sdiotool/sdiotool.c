@@ -95,7 +95,7 @@ static void probe_bcrm(struct cam_device *dev);
  * Here high-level workqueues and sg tables are allocated.
  * It then calls brcmf_sdio_probe_attach()
  *
- * Here at the beginning there is a pr_debug() call with brcmf_sdiod_regrl() inside to addr #define SI_ENUM_BASE            0x18000000.
+ * Here at the beginning there is a pr_debug() call with brcmf_sdiod_readl() inside to addr #define SI_ENUM_BASE            0x18000000.
  * Return value is 0x16044330.
  * Then turns off PLL:  byte-write BRCMF_INIT_CLKCTL1 (0x28) ->  SBSDIO_FUNC1_CHIPCLKCSR (0x1000E)
  * Then it reads value back, should be 0xe8.
@@ -161,7 +161,7 @@ static void probe_bcrm(struct cam_device *dev);
 /* BRCM-specific functions */
 #define SDIOH_API_ACCESS_RETRY_LIMIT	2
 #define SI_ENUM_BASE            0x18000000
-#define REPLY_MAGIC             0x16044330
+#define	F1_SIGNATURE		0x15264345
 #define brcmf_err(fmt, ...) brcmf_dbg(0, fmt, ##__VA_ARGS__)
 #define brcmf_dbg(level, fmt, ...) printf(fmt, ##__VA_ARGS__)
 
@@ -180,7 +180,7 @@ static int brcmf_sdiod_request_data(struct brcmf_sdio_dev *sdiodev, u8 fn, u32 a
 				    u8 regsz, void *data, bool write);
 static int brcmf_sdiod_set_sbaddr_window(struct brcmf_sdio_dev *sdiodev, u32 address);
 static int brcmf_sdiod_addrprep(struct brcmf_sdio_dev *sdiodev, uint width, u32 *addr);
-u32 brcmf_sdiod_regrl(struct brcmf_sdio_dev *sdiodev, u32 addr, int *ret);
+u32 brcmf_sdiod_readl(struct brcmf_sdio_dev *sdiodev, u32 addr, int *ret);
 
 static void bailout(int ret);
 
@@ -388,7 +388,7 @@ brcmf_sdiod_set_sbaddr_window(struct brcmf_sdio_dev *sdiodev, u32 address)
 	return err;
 }
 
-u32 brcmf_sdiod_regrl(struct brcmf_sdio_dev *sdiodev, u32 addr, int *ret)
+u32 brcmf_sdiod_readl(struct brcmf_sdio_dev *sdiodev, u32 addr, int *ret)
 {
 	u32 data = 0;
 	int retval;
@@ -487,18 +487,18 @@ get_sdio_card_info(struct cam_device *dev, struct card_info *ci) {
 }
 
 int
-main(int argc, char **argv) {
+main(int argc, char **argv)
+{
 	char device[] = "pass";
-	int unit = 0;
-	int func = 0;
-	__unused uint8_t *fw_ptr;
-	int ch;
 	struct cam_device *cam_dev;
-	int ret;
+#ifdef notyet
+	uint8_t *fw_ptr;
+#endif
 	struct card_info ci;
+	int ch, func, ret, unit;
+	uint32_t f1sig;
 
-	//fw_ptr = mmap_fw();
-
+	func = unit = 0;
 	while ((ch = getopt(argc, argv, "fu:")) != -1) {
 		switch (ch) {
 		case 'u':
@@ -514,6 +514,10 @@ main(int argc, char **argv) {
 	}
 	argc -= optind;
 	argv += optind;
+
+#ifdef notyet
+	fw_ptr = mmap_fw();
+#endif
 
 	if ((cam_dev = cam_open_spec_device(device, unit, O_RDWR, NULL)) == NULL)
 		errx(1, "Cannot open device");
@@ -546,11 +550,15 @@ main(int argc, char **argv) {
 	brcmf_dev.func[2]->num = 2;
 
 	ret = sdio_func_enable(cam_dev, 1, 1);bailout(ret);
-	uint32_t magic = brcmf_sdiod_regrl(&brcmf_dev, 0x18000000, &ret);
-	printf("Magic = %#08x\n", magic);
-	if (magic != REPLY_MAGIC) {
-		errx(1, "Reply magic is incorrect: expected %#08x, got %#08x",
-		     REPLY_MAGIC, magic);
-	}
+	f1sig = brcmf_sdiod_readl(&brcmf_dev, SI_ENUM_BASE, &ret);
+	bailout(ret);
+	if (f1sig != F1_SIGNATURE)
+		errx(1, "F1 signature read @%#08x is incorrect: expected "
+		    "%#08x, got %#08x", SI_ENUM_BASE, F1_SIGNATURE, f1sig);
+	else
+		printf("F1 signature @%#08x OK: %#08x\n", SI_ENUM_BASE, f1sig);
+
 	cam_close_spec_device(cam_dev);
+
+	return (0);
 }
