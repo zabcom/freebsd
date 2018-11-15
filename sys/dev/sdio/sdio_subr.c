@@ -72,10 +72,6 @@ __FBSDID("$FreeBSD$");
 #define warnx(fmt, ...)	\
     CAM_DEBUG(ccb->ccb_h.path, CAM_DEBUG_PERIPH, (fmt, ##__VA_ARGS__))
 
-/* CMD52: direct byte access */
-int sdio_rw_direct(union ccb *ccb, uint8_t func_number, uint32_t addr,
-    uint8_t is_write, uint8_t *data, uint8_t *resp);
-
 static int
 sdioerror(union ccb *ccb, u_int32_t cam_flags, u_int32_t sense_flags)
 {
@@ -83,7 +79,9 @@ sdioerror(union ccb *ccb, u_int32_t cam_flags, u_int32_t sense_flags)
 	return(cam_periph_error(ccb, cam_flags, sense_flags, NULL));
 }
 
-int sdio_rw_direct(union ccb *ccb, uint8_t func_number, uint32_t addr,
+/* CMD52: direct byte access */
+int
+sdio_rw_direct(union ccb *ccb, uint8_t func_number, uint32_t addr,
     uint8_t is_write, uint8_t *data, uint8_t *resp)
 {
 	struct ccb_mmcio *mmcio;

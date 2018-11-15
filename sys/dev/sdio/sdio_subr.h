@@ -57,7 +57,7 @@ uint32_t sdio_get_common_cis_addr(union ccb *ccb);
 int sdio_func_read_cis(union ccb *ccb, uint8_t func_number,
 		       uint32_t cis_addr, struct cis_info *info);
 int get_sdio_card_info(union ccb *ccb, struct card_info *ci);
-#else /* _KERNEL */
+#else /* !_KERNEL */
 
 #endif /* _KERNEL */
 #endif /* _SDIO_SUBR_H_ */
