@@ -29,15 +29,14 @@
 #include <sys/cdefs.h>
 __FBSDID("$FreeBSD$");
 
+#include <sys/errno.h>
 #include "cam_sdio.h"
 
 /* Use CMD52 to read or write a single byte */
 int
-sdio_rw_direct(struct cam_device *dev,
-	       uint8_t func_number,
-	       uint32_t addr,
-	       uint8_t is_write,
-	       uint8_t *data, uint8_t *resp) {
+sdio_rw_direct(struct cam_device *dev, uint8_t func_number, uint32_t addr,
+    uint8_t is_write, uint8_t *data, uint8_t *resp)
+{
 	union ccb *ccb;
 	uint32_t flags;
 	uint32_t arg;
@@ -90,13 +89,10 @@ sdio_rw_direct(struct cam_device *dev,
  * blk_count > 0: block mode
  */
 int
-sdio_rw_extended(struct cam_device *dev,
-		 uint8_t func_number,
-		 uint32_t addr,
-		 uint8_t is_write,
-		 caddr_t data, size_t datalen,
-		 uint8_t is_increment,
-		 uint16_t blk_count) {
+sdio_rw_extended(struct cam_device *dev, uint8_t func_number, uint32_t addr,
+    uint8_t is_write, caddr_t data, size_t datalen, uint8_t is_increment,
+    uint16_t blk_count)
+{
 	union ccb *ccb;
 	uint32_t flags;
 	uint32_t arg;
@@ -168,7 +164,9 @@ sdio_rw_extended(struct cam_device *dev,
 
 
 int
-sdio_read_bool_for_func(struct cam_device *dev, uint32_t addr, uint8_t func_number, uint8_t *is_enab) {
+sdio_read_bool_for_func(struct cam_device *dev, uint32_t addr,
+    uint8_t func_number, uint8_t *is_enab)
+{
 	uint8_t resp;
 	int ret;
 
@@ -182,7 +180,9 @@ sdio_read_bool_for_func(struct cam_device *dev, uint32_t addr, uint8_t func_numb
 }
 
 int
-sdio_set_bool_for_func(struct cam_device *dev, uint32_t addr, uint8_t func_number, int enable) {
+sdio_set_bool_for_func(struct cam_device *dev, uint32_t addr,
+    uint8_t func_number, int enable)
+{
 	uint8_t resp;
 	int ret;
 	uint8_t is_enabled;
@@ -207,21 +207,30 @@ sdio_set_bool_for_func(struct cam_device *dev, uint32_t addr, uint8_t func_numbe
 
 /* Conventional I/O functions */
 uint8_t
-sdio_read_1(struct cam_device *dev, uint8_t func_number, uint32_t addr, int *ret) {
+sdio_read_1(struct cam_device *dev, uint8_t func_number, uint32_t addr,
+    int *ret)
+{
 	uint8_t val;
+
 	*ret = sdio_rw_direct(dev, func_number, addr, 0, NULL, &val);
 	return val;
 }
 
 int
-sdio_write_1(struct cam_device *dev, uint8_t func_number, uint32_t addr, uint8_t val) {
+sdio_write_1(struct cam_device *dev, uint8_t func_number, uint32_t addr,
+    uint8_t val)
+{
 	uint8_t _val;
+
 	return sdio_rw_direct(dev, func_number, addr, 0, &val, &_val);
 }
 
 uint16_t
-sdio_read_2(struct cam_device *dev, uint8_t func_number, uint32_t addr, int *ret) {
+sdio_read_2(struct cam_device *dev, uint8_t func_number, uint32_t addr,
+    int *ret)
+{
 	uint16_t val;
+
 	*ret = sdio_rw_extended(dev, func_number, addr,
 				/* is_write */ 0,
 				/* data */ (caddr_t) &val,
@@ -229,12 +238,15 @@ sdio_read_2(struct cam_device *dev, uint8_t func_number, uint32_t addr, int *ret
 				/* is_increment */ 1,
 				/* blk_count */ 0
 		);
+
 	return val;
 }
 
-
 int
-sdio_write_2(struct cam_device *dev, uint8_t func_number, uint32_t addr, uint16_t val) {
+sdio_write_2(struct cam_device *dev, uint8_t func_number, uint32_t addr,
+    uint16_t val)
+{
+
 	return sdio_rw_extended(dev, func_number, addr,
 				/* is_write */ 1,
 				/* data */ (caddr_t) &val,
@@ -245,8 +257,11 @@ sdio_write_2(struct cam_device *dev, uint8_t func_number, uint32_t addr, uint16_
 }
 
 uint32_t
-sdio_read_4(struct cam_device *dev, uint8_t func_number, uint32_t addr, int *ret) {
+sdio_read_4(struct cam_device *dev, uint8_t func_number, uint32_t addr,
+    int *ret)
+{
 	uint32_t val;
+
 	*ret = sdio_rw_extended(dev, func_number, addr,
 				/* is_write */ 0,
 				/* data */ (caddr_t) &val,
@@ -257,9 +272,11 @@ sdio_read_4(struct cam_device *dev, uint8_t func_number, uint32_t addr, int *ret
 	return val;
 }
 
-
 int
-sdio_write_4(struct cam_device *dev, uint8_t func_number, uint32_t addr, uint32_t val) {
+sdio_write_4(struct cam_device *dev, uint8_t func_number, uint32_t addr,
+    uint32_t val)
+{
+
 	return sdio_rw_extended(dev, func_number, addr,
 				/* is_write */ 1,
 				/* data */ (caddr_t) &val,
@@ -271,34 +288,54 @@ sdio_write_4(struct cam_device *dev, uint8_t func_number, uint32_t addr, uint32_
 
 /* Higher-level wrappers for certain management operations */
 int
-sdio_is_func_ready(struct cam_device *dev, uint8_t func_number, uint8_t *is_enab) {
-	return sdio_read_bool_for_func(dev, SD_IO_CCCR_FN_READY, func_number, is_enab);
+sdio_is_func_ready(struct cam_device *dev, uint8_t func_number,
+    uint8_t *is_enab)
+{
+
+	return sdio_read_bool_for_func(dev, SD_IO_CCCR_FN_READY,
+	    func_number, is_enab);
 }
 
 int
-sdio_is_func_enabled(struct cam_device *dev, uint8_t func_number, uint8_t *is_enab) {
-	return sdio_read_bool_for_func(dev, SD_IO_CCCR_FN_ENABLE, func_number, is_enab);
+sdio_is_func_enabled(struct cam_device *dev, uint8_t func_number,
+    uint8_t *is_enab)
+{
+
+	return sdio_read_bool_for_func(dev, SD_IO_CCCR_FN_ENABLE,
+	    func_number, is_enab);
 }
 
 int
-sdio_func_enable(struct cam_device *dev, uint8_t func_number, int enable) {
-	return sdio_set_bool_for_func(dev, SD_IO_CCCR_FN_ENABLE, func_number, enable);
+sdio_func_enable(struct cam_device *dev, uint8_t func_number, int enable)
+{
+
+	return sdio_set_bool_for_func(dev, SD_IO_CCCR_FN_ENABLE,
+	    func_number, enable);
 }
 
 int
-sdio_is_func_intr_enabled(struct cam_device *dev, uint8_t func_number, uint8_t *is_enab) {
-	return sdio_read_bool_for_func(dev, SD_IO_CCCR_INT_ENABLE, func_number, is_enab);
+sdio_is_func_intr_enabled(struct cam_device *dev, uint8_t func_number,
+    uint8_t *is_enab)
+{
+
+	return sdio_read_bool_for_func(dev, SD_IO_CCCR_INT_ENABLE,
+	    func_number, is_enab);
 }
 
 int
-sdio_func_intr_enable(struct cam_device *dev, uint8_t func_number, int enable) {
-	return sdio_set_bool_for_func(dev, SD_IO_CCCR_INT_ENABLE, func_number, enable);
+sdio_func_intr_enable(struct cam_device *dev, uint8_t func_number, int enable)
+{
+
+	return sdio_set_bool_for_func(dev, SD_IO_CCCR_INT_ENABLE,
+	     func_number, enable);
 }
 
 int
-sdio_card_set_bus_width(struct cam_device *dev, enum mmc_bus_width bw) {
+sdio_card_set_bus_width(struct cam_device *dev, enum mmc_bus_width bw)
+{
 	int ret;
 	uint8_t ctl_val;
+
 	ret = sdio_rw_direct(dev, 0, SD_IO_CCCR_BUS_WIDTH, 0, NULL, &ctl_val);
 	if (ret < 0) {
 		warn("Error getting CCCR_BUS_WIDTH value");
@@ -327,13 +364,13 @@ sdio_card_set_bus_width(struct cam_device *dev, enum mmc_bus_width bw) {
 
 int
 sdio_func_read_cis(struct cam_device *dev, uint8_t func_number,
-		   uint32_t cis_addr, struct cis_info *info) {
-	uint8_t tuple_id, tuple_len, tuple_count;
-	uint32_t addr;
-
+    uint32_t cis_addr, struct cis_info *info)
+{
+	char cis1_info_buf[256];
 	char *cis1_info[4];
 	int start, i, ch, count, ret;
-	char cis1_info_buf[256];
+	uint32_t addr;
+	uint8_t tuple_id, tuple_len, tuple_count, v;
 
 	tuple_count = 0; /* Use to prevent infinite loop in case of parse errors */
 	memset(cis1_info_buf, 0, 256);
@@ -347,7 +384,7 @@ sdio_func_read_cis(struct cam_device *dev, uint8_t func_number,
 			continue;
 		}
 		tuple_len = sdio_read_1(dev, 0, addr++, &ret);
-		if (tuple_len == 0 && tuple_id != 0x00) {
+		if (tuple_len == 0) {
 			warn("Parse error: 0-length tuple %#02x\n", tuple_id);
 			return -1;
 		}
@@ -378,7 +415,6 @@ sdio_func_read_cis(struct cam_device *dev, uint8_t func_number,
 		case SD_IO_CISTPL_MANFID:
 			info->man_id =  sdio_read_1(dev, 0, addr++, &ret);
 			info->man_id |= sdio_read_1(dev, 0, addr++, &ret) << 8;
-
 			info->prod_id =  sdio_read_1(dev, 0, addr++, &ret);
 			info->prod_id |= sdio_read_1(dev, 0, addr++, &ret) << 8;
 			break;
@@ -390,28 +426,73 @@ sdio_func_read_cis(struct cam_device *dev, uint8_t func_number,
 				printf("FUNCE is too short: %d\n", tuple_len);
 				break;
 			}
+			/* TPLFE_TYPE (Extended Data) */
+			v  = sdio_read_1(dev, 0, addr++, &ret);
 			if (func_number == 0) {
-				/* skip extended_data */
-				addr++;
+				/* Assert that v == 0. */
 				info->max_block_size  = sdio_read_1(dev, 0, addr++, &ret);
-				info->max_block_size |= sdio_read_1(dev, 0, addr++, &ret) << 8;
+				info->max_block_size |= sdio_read_1(dev, 0, addr, &ret) << 8
 			} else {
+				if (v != 0x01)
+					break;
 				info->max_block_size  = sdio_read_1(dev, 0, addr + 0xC, &ret);
 				info->max_block_size |= sdio_read_1(dev, 0, addr + 0xD, &ret) << 8;
 			}
 			break;
 		default:
-			warnx("Skipping tuple ID %#02x len %#02x\n", tuple_id, tuple_len);
+			warnx("Skipping func_number %d tuple %d ID %#02x len %#02x",
+			    func_number, tuple_count, tuple_id, tuple_len);
 		}
-		cis_addr += tuple_len + 2;
+		if (tuple_len = 0xff) {
+			/* Also marks the end of a tuple chain (E1 16.2) */
+			/* The tuple is valid, hence this going at the end. */
+			break;
+		}
+		cis_addr += 2 + tuple_len;
 		tuple_count++;
 	} while (tuple_count < 20);
 
 	return 0;
 }
 
+int
+sdio_get_mmcp_func_count(struct cam_device *dev, uint8_t *func_count)
+{
+	union ccb *ccb;
+	struct ccb_dev_advinfo *advi;
+	struct mmc_params mmc_ident_data;
+
+	ccb = cam_getccb(dev);
+	if (ccb == NULL) {
+		warnx("couldn't allocate CCB");
+		return (ENOMEM);
+	}
+
+	advi = &ccb->cdai;
+	advi->ccb_h.flags = CAM_DIR_IN;
+	advi->ccb_h.func_code = XPT_DEV_ADVINFO;
+	advi->flags = CDAI_FLAG_NONE;
+	advi->buftype = CDAI_TYPE_MMC_PARAMS;
+	advi->bufsiz = sizeof(struct mmc_params);
+	advi->buf = (uint8_t *)&mmc_ident_data;
+
+	if (cam_send_ccb(dev, ccb) < 0) {
+		warn("error sending CAMIOCOMMAND ioctl");
+		cam_freeccb(ccb);
+		return (EIO);
+	}
+
+	if (func_count != NULL)
+		*func_count = mmc_ident_data.sdio_func_count;
+
+	cam_freeccb(ccb);
+
+	return (0);
+}
+
 uint32_t
-sdio_get_common_cis_addr(struct cam_device *dev) {
+sdio_get_common_cis_addr(struct cam_device *dev)
+{
 	uint32_t addr;
 	int ret;
 
@@ -427,9 +508,12 @@ sdio_get_common_cis_addr(struct cam_device *dev) {
 	return addr;
 }
 
-void sdio_card_reset(struct cam_device *dev) {
+void
+sdio_card_reset(struct cam_device *dev)
+{
 	int ret;
 	uint8_t ctl_val;
+
 	ret = sdio_rw_direct(dev, 0, SD_IO_CCCR_CTL, 0, NULL, &ctl_val);
 	if (ret < 0)
 		errx(1, "Error getting CCCR_CTL value");

@@ -161,7 +161,6 @@ static void probe_bcrm(struct cam_device *dev);
 /* BRCM-specific functions */
 #define SDIOH_API_ACCESS_RETRY_LIMIT	2
 #define SI_ENUM_BASE            0x18000000
-#define	F1_SIGNATURE		0x15264345
 #define brcmf_err(fmt, ...) brcmf_dbg(0, fmt, ##__VA_ARGS__)
 #define brcmf_dbg(level, fmt, ...) printf(fmt, ##__VA_ARGS__)
 
@@ -175,17 +174,15 @@ struct brcmf_sdio_dev {
 
 void brcmf_bus_change_state(struct brcmf_bus *bus, enum brcmf_bus_state state);
 void brcmf_sdiod_change_state(struct brcmf_sdio_dev *sdiodev,
-			      enum brcmf_sdiod_state state);
-static int brcmf_sdiod_request_data(struct brcmf_sdio_dev *sdiodev, u8 fn, u32 addr,
-				    u8 regsz, void *data, bool write);
-static int brcmf_sdiod_set_sbaddr_window(struct brcmf_sdio_dev *sdiodev, u32 address);
-static int brcmf_sdiod_addrprep(struct brcmf_sdio_dev *sdiodev, uint width, u32 *addr);
+    enum brcmf_sdiod_state state);
+static int brcmf_sdiod_request_data(struct brcmf_sdio_dev *sdiodev, u8 fn,
+     u32 addr, u8 regsz, void *data, bool write);
 u32 brcmf_sdiod_readl(struct brcmf_sdio_dev *sdiodev, u32 addr, int *ret);
 
-static void bailout(int ret);
-
 static void
-bailout(int ret) {
+bailout(int ret)
+{
+
 	if (ret == 0)
 		return;
 	errx(1, "Operation returned error %d", ret);
@@ -194,11 +191,13 @@ bailout(int ret) {
 void
 brcmf_bus_change_state(struct brcmf_bus *bus, enum brcmf_bus_state state)
 {
+
 	bus->state = state;
 }
 
-void brcmf_sdiod_change_state(struct brcmf_sdio_dev *sdiodev,
-			      enum brcmf_sdiod_state state)
+void
+brcmf_sdiod_change_state(struct brcmf_sdio_dev *sdiodev,
+    enum brcmf_sdiod_state state)
 {
 	if (sdiodev->state == BRCMF_SDIOD_NOMEDIUM ||
 	    state == sdiodev->state)
@@ -221,8 +220,9 @@ void brcmf_sdiod_change_state(struct brcmf_sdio_dev *sdiodev,
 	sdiodev->state = state;
 }
 
-static inline int brcmf_sdiod_f0_writeb(struct sdio_func *func,
-					uint regaddr, u8 byte) {
+static inline int
+brcmf_sdiod_f0_writeb(struct sdio_func *func, uint regaddr, u8 byte)
+{
 	int err_ret;
 
 	/*
@@ -239,13 +239,15 @@ static inline int brcmf_sdiod_f0_writeb(struct sdio_func *func,
 	return err_ret;
 }
 
-static int brcmf_sdiod_request_data(struct brcmf_sdio_dev *sdiodev, u8 fn, u32 addr, u8 regsz, void *data, bool write)
+static int
+brcmf_sdiod_request_data(struct brcmf_sdio_dev *sdiodev, u8 fn, u32 addr,
+    u8 regsz, void *data, bool write)
 {
 	struct sdio_func *func;
 	int ret = -EINVAL;
 
-	brcmf_dbg(SDIO, "rw=%d, func=%d, addr=%#05x, nbytes=%d\n",
-		  write, fn, addr, regsz);
+	brcmf_dbg(SDIO, "rw=%-5s, func=%d, addr=%#08x, nbytes=%d\n",
+	    (write) ? "write" : "read", fn, addr, regsz);
 
 	/* only allow byte access on F0 */
 	if (WARN_ON(regsz > 1 && !fn))
@@ -292,28 +294,9 @@ static int brcmf_sdiod_request_data(struct brcmf_sdio_dev *sdiodev, u8 fn, u32 a
 }
 
 static int
-brcmf_sdiod_addrprep(struct brcmf_sdio_dev *sdiodev, uint width, u32 *addr)
+brcmf_sdiod_regrw_helper(struct brcmf_sdio_dev *sdiodev, u32 addr, u8 regsz,
+    void *data, bool write)
 {
-	uint bar0 = *addr & ~SBSDIO_SB_OFT_ADDR_MASK;
-	int err = 0;
-
-	if (bar0 != sdiodev->sbwad) {
-		err = brcmf_sdiod_set_sbaddr_window(sdiodev, bar0);
-		if (err)
-			return err;
-
-		sdiodev->sbwad = bar0;
-	}
-
-	*addr &= SBSDIO_SB_OFT_ADDR_MASK;
-
-	if (width == 4)
-		*addr |= SBSDIO_SB_ACCESS_2_4B_FLAG;
-
-	return 0;
-}
-
-static int brcmf_sdiod_regrw_helper(struct brcmf_sdio_dev *sdiodev, u32 addr, u8 regsz, void *data, bool write) {
 	u8 func;
 	s32 retry = 0;
 	int ret;
@@ -361,57 +344,83 @@ static int brcmf_sdiod_regrw_helper(struct brcmf_sdio_dev *sdiodev, u32 addr, u8
 	return ret;
 }
 
+
 static int
 brcmf_sdiod_set_sbaddr_window(struct brcmf_sdio_dev *sdiodev, u32 address)
 {
 	int err = 0, i;
 	u8 addr[3];
 
-	if (sdiodev->state == BRCMF_SDIOD_NOMEDIUM)
-		return -ENOMEDIUM;
+	if (sdiodev->state == BRCMF_SDIOD_NOMEDIUM) {
+		brcmf_err("%s: sdiodev->state %#02x (NOMEDIUM)\n",
+		    __func__, sdiodev->state);
+		return (-ENOMEDIUM);
+	}
 
 	addr[0] = (address >> 8) & SBSDIO_SBADDRLOW_MASK;
 	addr[1] = (address >> 16) & SBSDIO_SBADDRMID_MASK;
 	addr[2] = (address >> 24) & SBSDIO_SBADDRHIGH_MASK;
-
 	for (i = 0; i < 3; i++) {
 		err = brcmf_sdiod_regrw_helper(sdiodev,
-					       SBSDIO_FUNC1_SBADDRLOW + i,
-					       sizeof(u8), &addr[i], true);
+		    SBSDIO_FUNC1_SBADDRLOW + i, sizeof(u8), &addr[i], true);
 		if (err) {
-			brcmf_err("failed at addr: 0x%0x\n",
-				  SBSDIO_FUNC1_SBADDRLOW + i);
+			brcmf_err("%s: failed at addr: 0x%08x\n",
+			    __func__, SBSDIO_FUNC1_SBADDRLOW + i);
 			break;
 		}
 	}
 
-	return err;
+	return (err);
 }
 
-u32 brcmf_sdiod_readl(struct brcmf_sdio_dev *sdiodev, u32 addr, int *ret)
+static int
+brcmf_sdiod_addrprep(struct brcmf_sdio_dev *sdiodev, uint width, u32 *addr)
 {
-	u32 data = 0;
+	uint bar0;
+	int err;
+
+	bar0 = *addr & ~SBSDIO_SB_OFT_ADDR_MASK;
+	if (bar0 != sdiodev->sbwad) {
+		err = brcmf_sdiod_set_sbaddr_window(sdiodev, bar0);
+		if (err)
+			return (err);
+		sdiodev->sbwad = bar0;
+	}
+
+	*addr &= SBSDIO_SB_OFT_ADDR_MASK;
+	if (width == 4)
+		*addr |= SBSDIO_SB_ACCESS_2_4B_FLAG;
+
+	return (0);
+}
+
+u32
+brcmf_sdiod_readl(struct brcmf_sdio_dev *sdiodev, u32 addr, int *ret)
+{
+	u32 data;
 	int retval;
 
-	brcmf_dbg(SDIO, "addr:%#08x\n", addr);
+	data = 0;
+	brcmf_dbg(SDIO, "%s: addr: %#08x\n", __func__, addr);
 	retval = brcmf_sdiod_addrprep(sdiodev, sizeof(data), &addr);
 	if (retval)
 		goto done;
 	retval = brcmf_sdiod_regrw_helper(sdiodev, addr, sizeof(data), &data,
-					  false);
-	brcmf_dbg(SDIO, "data:%#08x\n", data);
+	    false);
+	brcmf_dbg(SDIO, "%s: data: %#08x\n", __func__, data);
 
 done:
 	if (ret)
 		*ret = retval;
 
-	return data;
+	return (data);
 }
 
 /********************************************************/
 __unused
 static void
-probe_bcrm(struct cam_device *dev) {
+probe_bcrm(struct cam_device *dev)
+{
 	uint32_t cis_addr;
 	struct cis_info info;
 
@@ -425,7 +434,8 @@ probe_bcrm(struct cam_device *dev) {
 }
 
 __unused static uint8_t*
-mmap_fw() {
+mmap_fw()
+{
 	const char fw_path[] = "/home/kibab/repos/fbsd-bbb/brcm-firmware/brcmfmac4330-sdio.bin";
 	struct stat sb;
 	uint8_t *fw_ptr;
@@ -443,7 +453,8 @@ mmap_fw() {
 }
 
 static void
-usage() {
+usage()
+{
 	printf("sdiotool -u <pass_dev_unit>\n");
 	exit(0);
 }
@@ -459,24 +470,31 @@ struct card_info {
  * of checking for man_id = 0x00 for detecting number of functions
  */
 static void
-get_sdio_card_info(struct cam_device *dev, struct card_info *ci) {
+get_sdio_card_info(struct cam_device *dev, struct card_info *ci)
+{
 	uint32_t cis_addr;
 	uint32_t fbr_addr;
 	int ret;
+	uint8_t func_count;
 
 	cis_addr = sdio_get_common_cis_addr(dev);
+	func_count = nitems(ci->f);
+	(void) sdio_get_mmcp_func_count(dev, &func_count);
+	/* Make sure we do not overflow the function count. */
+	func_count = MIN(func_count, nitems(ci->f));
 
 	memset(ci, 0, sizeof(struct card_info));
 	sdio_func_read_cis(dev, 0, cis_addr, &ci->f[0]);
 	printf("F0: Vendor %#04x product %#04x max block size %d bytes\n",
 	       ci->f[0].man_id, ci->f[0].prod_id, ci->f[0].max_block_size);
-	for (int i = 1; i <= 7; i++) {
+	for (int i = 1; i < func_count; i++) {
 		fbr_addr = SD_IO_FBR_START * i + 0x9;
-		cis_addr =  sdio_read_1(dev, 0, fbr_addr++, &ret);bailout(ret);
+		cis_addr =  sdio_read_1(dev, 0, fbr_addr++, &ret);
+		bailout(ret);
 		cis_addr |= sdio_read_1(dev, 0, fbr_addr++, &ret) << 8;
 		cis_addr |= sdio_read_1(dev, 0, fbr_addr++, &ret) << 16;
 		sdio_func_read_cis(dev, i, cis_addr, &ci->f[i]);
-		printf("F%d: Vendor %#04x product %#04 max block size %d bytes\n",
+		printf("F%d: Vendor %#04x product %#04x max block size %d bytes\n",
 		       i, ci->f[i].man_id, ci->f[i].prod_id, ci->f[i].max_block_size);
 		if (ci->f[i].man_id == 0) {
 			printf("F%d doesn't exist\n", i);
@@ -552,11 +570,14 @@ main(int argc, char **argv)
 	ret = sdio_func_enable(cam_dev, 1, 1);bailout(ret);
 	f1sig = brcmf_sdiod_readl(&brcmf_dev, SI_ENUM_BASE, &ret);
 	bailout(ret);
-	if (f1sig != F1_SIGNATURE)
-		errx(1, "F1 signature read @%#08x is incorrect: expected "
-		    "%#08x, got %#08x", SI_ENUM_BASE, F1_SIGNATURE, f1sig);
-	else
-		printf("F1 signature @%#08x OK: %#08x\n", SI_ENUM_BASE, f1sig);
+	/*
+	 * The signature seems to be revision specific at least
+	 * as I see different signatures for the same vendor/product
+	 * combinations.
+	 * Probably a good early debugging hint for well-informed
+	 * developers to make sure the SDIO accesses work fine.
+	 */
+	brcmf_dbg(SDIO, "F1 signature @%#08x: %#08x\n", SI_ENUM_BASE, f1sig);
 
 	cam_close_spec_device(cam_dev);
 

@@ -94,4 +94,6 @@ void sdio_card_reset(struct cam_device *dev);
 uint32_t sdio_get_common_cis_addr(struct cam_device *dev);
 int sdio_func_read_cis(struct cam_device *dev, uint8_t func_number,
 		       uint32_t cis_addr, struct cis_info *info);
+int sdio_get_mmcp_func_count(struct cam_device *dev, uint8_t *func_count);
+
 int sdio_card_set_bus_width(struct cam_device *dev, enum mmc_bus_width bw);
