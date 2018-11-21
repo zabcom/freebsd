@@ -71,6 +71,7 @@ SUBDIR=	\
 	${_bm} \
 	bnxt \
 	bridgestp \
+	bwfw \
 	bwi \
 	bwn \
 	${_bytgpio} \
