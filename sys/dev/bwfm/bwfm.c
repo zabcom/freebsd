@@ -66,7 +66,11 @@
 #include <dev/bwfm/bwfmreg.h>
 #endif
 
-#if defined(__FreeBSD__)
+#if defined(__OpenBSD__)
+#define	BWFM_LOCK(sc)
+#define	BWFM_UNLOCK(sc)
+#define	BWFM_LOCK_ASSERT(sc)
+#elif defined(__FreeBSD__)
 struct ieee80211_nodereq;
 #define	IFF_RUNNING		IFF_DRV_RUNNING
 #define	letoh16(_x)		le16toh((_x))
@@ -76,6 +80,10 @@ struct ieee80211_nodereq;
 #define	delay(_x)		DELAY((_x))
 #define	M_DONTWAIT		M_NOWAIT
 #define	splsoftnet(_x)		0
+
+#define	BWFM_LOCK(_sc)		mtx_lock(&(_sc)->sc_mtx)
+#define	BWFM_UNLOCK(_sc)	mtx_unlock(&(_sc)->sc_mtx)
+#define	BWFM_LOCK_ASSERT(_sc)	mtx_assert(&(_sc)->sc_mtx, MA_OWNED)
 #endif
 
 /* #define BWFM_DEBUG */
@@ -94,7 +102,9 @@ static int bwfm_debug = 1;
 #define DEVNAME(sc)	(device_get_nameunit((sc)->sc_dev))
 #endif
 
+#if defined(__OpenBSD__)
 void	 bwfm_start(struct ifnet *);
+#endif
 void	 bwfm_init(struct ifnet *);
 void	 bwfm_stop(struct ifnet *);
 void	 bwfm_watchdog(struct ifnet *);
@@ -208,6 +218,55 @@ struct cfdriver bwfm_cd = {
 };
 #endif
 
+#if defined(__FreeBSD__)
+/* Dequeue packets from sendq and transmit. */
+static void
+bwfm_start(struct bwfm_softc *sc)
+{
+	struct ieee80211_node *ni;
+	struct mbuf *m;
+
+	BWFM_LOCK_ASSERT(sc);
+
+	while (sc->qfullmsk == 0 &&
+	    (m = mbufq_dequeue(&sc->sc_snd)) != NULL) {
+
+		/* What a net80211 hack is this? ;-) */
+		ni = (struct ieee80211_node *)m->m_pkthdr.rcvif;
+		if (sc->sc_bus_ops->bs_txdata(sc, m) != 0) {
+			if_inc_counter(ni->ni_vap->iv_ifp,
+			    IFCOUNTER_OERRORS, 1);
+			ieee80211_free_node(ni);
+			continue;
+		}
+		sc->sc_tx_timer = 15;
+	}
+}
+
+static int
+bwfm_transmit(struct ieee80211com *ic, struct mbuf *m)
+{
+	struct bwfm_softc *sc;
+	int error;
+
+	sc = ic->ic_softc;
+	BWFM_LOCK(sc);
+	if ((sc->sc_flags & BWFM_FLAG_HW_INITALIZED) == 0) {
+		BWFM_UNLOCK(sc);
+		return (ENXIO);
+	}
+	error = mbufq_enqueue(&sc->sc_snd, m);
+	if (error != 0) {
+		BWFM_UNLOCK(sc);
+		return (error);
+	}
+	bwfm_start(sc);
+	BWFM_UNLOCK(sc);
+
+	return (0);
+}
+#endif
+
 void
 bwfm_attach(struct bwfm_softc *sc)
 {
@@ -258,6 +317,8 @@ bwfm_attach(struct bwfm_softc *sc)
 
 	if_attach(ifp);
 	ieee80211_ifattach(ifp);
+#elif defined(__FreeBSD__)
+	ic->ic_transmit = bwfm_transmit;
 #endif
 
 #if defined(__OpenBSD__)
@@ -384,17 +445,29 @@ bwfm_preinit(struct bwfm_softc *sc)
 	/* Configure channel information obtained from firmware. */
 #if defined(__OpenBSD__)
 	ieee80211_channel_init(ifp);
+#elif defined(__FreeBSD__)
+	ieee80211_chan_init(ic);
+#endif
 
 	/* Configure MAC address. */
 #if defined(__OpenBSD__)
 	if (if_setlladdr(ifp, ic->ic_myaddr))
 #elif defined(__FreeBSD__)
+#ifdef TODO
 	if (if_setlladdr(ifp, ic->ic_macaddr))
+#endif
 #endif
 		printf("%s: could not set MAC address\n", DEVNAME(sc));
 
+#if defined(__OpenBSD__)
 	ieee80211_media_init(ifp, bwfm_media_change, ieee80211_media_status);
+#elif defined(__FreeBSD__)
+#ifdef TODO
+	ieee80211_vap_attach(vap, iwm_media_change, ieee80211_media_status,
+	    mac);
 #endif
+#endif
+
 	return 0;
 }
 
@@ -413,6 +486,7 @@ bwfm_detach(struct bwfm_softc *sc, int flags)
 	return 0;
 }
 
+#if defined(__OpenBSD__)
 void
 bwfm_start(struct ifnet *ifp)
 {
@@ -421,10 +495,8 @@ bwfm_start(struct ifnet *ifp)
 
 	if (!(ifp->if_flags & IFF_RUNNING))
 		return;
-#if defined(__OpenBSD__)
 	if (ifq_is_oactive(&ifp->if_snd))
 		return;
-#endif
 	if (IFQ_IS_EMPTY(&ifp->if_snd))
 		return;
 
@@ -432,24 +504,16 @@ bwfm_start(struct ifnet *ifp)
 
 	for (;;) {
 		if (sc->sc_bus_ops->bs_txcheck(sc)) {
-#if defined(__OpenBSD__)
 			ifq_set_oactive(&ifp->if_snd);
-#endif
 			break;
 		}
 
-#if defined(__OpenBSD__)
 		m = ifq_dequeue(&ifp->if_snd);
-#elif defined(__FreeBSD__)
-		IFQ_DRV_DEQUEUE(&ifp->if_snd, m);
-#endif
 		if (m == NULL)
 			break;
 
 		if (sc->sc_bus_ops->bs_txdata(sc, m) != 0) {
-#if defined(__OpenBSD__)
 			ifp->if_oerrors++;
-#endif
 			m_freem(m);
 			continue;
 		}
@@ -460,6 +524,7 @@ bwfm_start(struct ifnet *ifp)
 #endif
 	}
 }
+#endif
 
 void
 bwfm_init(struct ifnet *ifp)
@@ -607,9 +672,13 @@ bwfm_init(struct ifnet *ifp)
 void
 bwfm_stop(struct ifnet *ifp)
 {
-	struct bwfm_softc *sc = ifp->if_softc;
 #if defined(__OpenBSD__)
+	struct bwfm_softc *sc = ifp->if_softc;
 	struct ieee80211com *ic = &sc->sc_ic;
+#elif defined(__FreeBSD__)
+	struct ieee80211vap *vap = ifp->if_softc;
+	struct ieee80211com *ic = vap->iv_ic;
+	struct bwfm_softc *sc = ic->ic_softc;
 #endif
 	struct bwfm_join_params join;
 
@@ -622,6 +691,8 @@ bwfm_stop(struct ifnet *ifp)
 	ifq_clr_oactive(&ifp->if_snd);
 
 	ieee80211_new_state(ic, IEEE80211_S_INIT, -1);
+#elif defined(__FreeBSD__)
+	ieee80211_new_state(vap, IEEE80211_S_INIT, -1);
 #endif
 
 	memset(&join, 0, sizeof(join));
@@ -696,20 +767,32 @@ bwfm_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 	return error;
 }
 
+/* OK */
 int
 bwfm_media_change(struct ifnet *ifp)
 {
+#if defined(__FreeBSD__)
+	struct ieee80211vap *vap = ifp->if_softc;
+	struct ieee80211com *ic = vap->iv_ic;
+	struct bwfm_softc *sc = ic->ic_softc;
+#endif
 	int error;
 
 	error = ieee80211_media_change(ifp);
 	if (error != ENETRESET)
 		return error;
 
+	BWFM_LOCK(sc);
+#if defined(__OpenBSD__)
 	if ((ifp->if_flags & (IFF_UP | IFF_RUNNING)) ==
 	    (IFF_UP | IFF_RUNNING)) {
+#elif defined(__FreeBSD__)
+	if (ic->ic_nrunning > 0) {
 		bwfm_stop(ifp);
 		bwfm_init(ifp);
+#endif
 	}
+	BWFM_UNLOCK(sc);
 	return 0;
 }
 

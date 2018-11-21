@@ -152,6 +152,11 @@ struct bwfm_softc {
 	struct device		 sc_dev;
 #elif defined(__FreeBSD__)
 	device_t		 sc_dev;
+	struct mtx		 sc_mtx;
+	struct mbufq		 sc_snd;
+	int			 qfullmsk;
+	uint32_t		 sc_flags;
+#define	BWFM_FLAG_HW_INITALIZED		0x00000001
 #endif
 	struct ieee80211com	 sc_ic;
 	struct ifmedia		 sc_media;
