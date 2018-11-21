@@ -16,17 +16,32 @@
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 
+#if defined(__OpenBSD__)
 #include "bpfilter.h"
+#elif defined(__FreeBSD__)
+#include "opt_wlan.h"
+
+#define	NBPFILTER	0
+#endif
 
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/buf.h>
 #include <sys/kernel.h>
 #include <sys/malloc.h>
+#if defined(__OpenBSD__)
 #include <sys/device.h>
+#endif
 #include <sys/queue.h>
 #include <sys/socket.h>
 #include <sys/sockio.h>
+#if defined(__FreeBSD__)
+#include <sys/types.h>
+#include <sys/bus.h>
+#include <sys/endian.h>
+#include <sys/mbuf.h>
+#include <sys/taskqueue.h>
+#endif
 
 #if NBPFILTER > 0
 #include <net/bpf.h>
@@ -34,14 +49,34 @@
 #include <net/if.h>
 #include <net/if_dl.h>
 #include <net/if_media.h>
+#if defined(__FreeBSD__)
+#include <net/if_var.h>
+#endif
 
 #include <netinet/in.h>
 #include <netinet/if_ether.h>
 
 #include <net80211/ieee80211_var.h>
 
+#if defined(__OpenBSD__)
 #include <dev/ic/bwfmvar.h>
 #include <dev/ic/bwfmreg.h>
+#elif defined(__FreeBSD__)
+#include <dev/bwfm/bwfmvar.h>
+#include <dev/bwfm/bwfmreg.h>
+#endif
+
+#if defined(__FreeBSD__)
+struct ieee80211_nodereq;
+#define	IFF_RUNNING		IFF_DRV_RUNNING
+#define	letoh16(_x)		le16toh((_x))
+#define	h32tole(_x)		htole32((_x))
+#define	letoh32(_x)		le32toh((_x))
+#define	betoh32(_x)		be32toh((_x))
+#define	delay(_x)		DELAY((_x))
+#define	M_DONTWAIT		M_NOWAIT
+#define	splsoftnet(_x)		0
+#endif
 
 /* #define BWFM_DEBUG */
 #ifdef BWFM_DEBUG
@@ -53,7 +88,11 @@ static int bwfm_debug = 1;
 #define DPRINTFN(n, x)	do { ; } while (0)
 #endif
 
+#if defined(__OpenBSD__)
 #define DEVNAME(sc)	((sc)->sc_dev.dv_xname)
+#elif defined(__FreeBSD__)
+#define DEVNAME(sc)	(device_get_nameunit((sc)->sc_dev))
+#endif
 
 void	 bwfm_start(struct ifnet *);
 void	 bwfm_init(struct ifnet *);
@@ -163,27 +202,36 @@ struct bwfm_proto_ops bwfm_proto_bcdc_ops = {
 	.proto_rxctl = bwfm_proto_bcdc_rxctl,
 };
 
+#if defined(__OpenBSD__)
 struct cfdriver bwfm_cd = {
 	NULL, "bwfm", DV_IFNET
 };
+#endif
 
 void
 bwfm_attach(struct bwfm_softc *sc)
 {
 	struct ieee80211com *ic = &sc->sc_ic;
+#if defined(__OpenBSD__)
 	struct ifnet *ifp = &ic->ic_if;
+#endif
 
 	TAILQ_INIT(&sc->sc_bcdc_rxctlq);
 
 	/* Init host async commands ring. */
 	sc->sc_cmdq.cur = sc->sc_cmdq.next = sc->sc_cmdq.queued = 0;
+#if defined(__OpenBSD__)
 	sc->sc_taskq = taskq_create(DEVNAME(sc), 1, IPL_SOFTNET, 0);
 	task_set(&sc->sc_task, bwfm_task, sc);
+#endif
 
 	ic->ic_phytype = IEEE80211_T_OFDM;	/* not only, but not used */
 	ic->ic_opmode = IEEE80211_M_STA;	/* default to BSS mode */
+#if defined(__OpenBSD__)
 	ic->ic_state = IEEE80211_S_INIT;
+#endif
 
+#if defined(__OpenBSD__)
 	ic->ic_caps =
 #ifndef IEEE80211_STA_ONLY
 	    IEEE80211_C_HOSTAP |	/* Access Point */
@@ -191,10 +239,16 @@ bwfm_attach(struct bwfm_softc *sc)
 	    IEEE80211_C_RSN | 		/* WPA/RSN */
 	    IEEE80211_C_SCANALL |	/* device scans all channels at once */
 	    IEEE80211_C_SCANALLBAND;	/* device scans all bands at once */
+#endif
 
 	/* IBSS channel undefined for now. */
+#if defined(__OpenBSD__)
 	ic->ic_ibss_chan = &ic->ic_channels[0];
+#elif defined(__FreeBSD__)
+	ic->ic_bsschan = &ic->ic_channels[0];
+#endif
 
+#if defined(__OpenBSD__)
 	ifp->if_softc = sc;
 	ifp->if_flags = IFF_BROADCAST | IFF_SIMPLEX | IFF_MULTICAST;
 	ifp->if_ioctl = bwfm_ioctl;
@@ -204,18 +258,29 @@ bwfm_attach(struct bwfm_softc *sc)
 
 	if_attach(ifp);
 	ieee80211_ifattach(ifp);
+#endif
 
+#if defined(__OpenBSD__)
 	sc->sc_newstate = ic->ic_newstate;
 	ic->ic_newstate = bwfm_newstate;
 	ic->ic_send_mgmt = bwfm_send_mgmt;
 	ic->ic_set_key = bwfm_set_key;
 	ic->ic_delete_key = bwfm_delete_key;
+#elif defined(__FreeBSD__)
+	/* vap->iv_newstate */
+#endif
 
+#if defined(__OpenBSD__)
 	ieee80211_media_init(ifp, bwfm_media_change, ieee80211_media_status);
+#endif
 }
 
 void
+#if defined(__OpenBSD__)
 bwfm_attachhook(struct device *self)
+#elif defined(__FreeBSD__)
+bwfm_attachhook(device_t self)
+#endif
 {
 	struct bwfm_softc *sc = (struct bwfm_softc *)self;
 
@@ -231,7 +296,9 @@ int
 bwfm_preinit(struct bwfm_softc *sc)
 {
 	struct ieee80211com *ic = &sc->sc_ic;
+#if defined(__OpenBSD__)
 	struct ifnet *ifp = &ic->ic_if;
+#endif
 	int i, j, nbands, nmode, vhtmode;
 	uint32_t bandlist[3], tmp;
 
@@ -243,8 +310,13 @@ bwfm_preinit(struct bwfm_softc *sc)
 		return 1;
 	} else
 		sc->sc_io_type = tmp;
+#if defined(__OpenBSD__)
 	if (bwfm_fwvar_var_get_data(sc, "cur_etheraddr", ic->ic_myaddr,
 	    sizeof(ic->ic_myaddr))) {
+#elif defined(__FreeBSD__)
+	if (bwfm_fwvar_var_get_data(sc, "cur_etheraddr", ic->ic_macaddr,
+	    sizeof(ic->ic_macaddr))) {
+#endif
 		printf("%s: could not read mac address\n", DEVNAME(sc));
 		return 1;
 	}
@@ -264,10 +336,12 @@ bwfm_preinit(struct bwfm_softc *sc)
 		case BWFM_BAND_2G:
 			DPRINTF(("%s: 2G HT %d VHT %d\n",
 			    DEVNAME(sc), nmode, vhtmode));
+#if defined(__OpenBSD__)
 			ic->ic_sup_rates[IEEE80211_MODE_11B] =
 			    ieee80211_std_rateset_11b;
 			ic->ic_sup_rates[IEEE80211_MODE_11G] =
 			    ieee80211_std_rateset_11g;
+#endif
 
 			for (j = 0; j < nitems(bwfm_2ghz_channels); j++) {
 				uint8_t chan = bwfm_2ghz_channels[j];
@@ -284,8 +358,10 @@ bwfm_preinit(struct bwfm_softc *sc)
 		case BWFM_BAND_5G:
 			DPRINTF(("%s: 5G HT %d VHT %d\n",
 			    DEVNAME(sc), nmode, vhtmode));
+#if defined(__OpenBSD__)
 			ic->ic_sup_rates[IEEE80211_MODE_11A] =
 			    ieee80211_std_rateset_11a;
+#endif
 
 			for (j = 0; j < nitems(bwfm_5ghz_channels); j++) {
 				uint8_t chan = bwfm_5ghz_channels[j];
@@ -306,25 +382,34 @@ bwfm_preinit(struct bwfm_softc *sc)
 	}
 
 	/* Configure channel information obtained from firmware. */
+#if defined(__OpenBSD__)
 	ieee80211_channel_init(ifp);
 
 	/* Configure MAC address. */
+#if defined(__OpenBSD__)
 	if (if_setlladdr(ifp, ic->ic_myaddr))
+#elif defined(__FreeBSD__)
+	if (if_setlladdr(ifp, ic->ic_macaddr))
+#endif
 		printf("%s: could not set MAC address\n", DEVNAME(sc));
 
 	ieee80211_media_init(ifp, bwfm_media_change, ieee80211_media_status);
+#endif
 	return 0;
 }
 
 int
 bwfm_detach(struct bwfm_softc *sc, int flags)
 {
+#if defined(__OpenBSD__)
 	struct ieee80211com *ic = &sc->sc_ic;
 	struct ifnet *ifp = &ic->ic_if;
+
 	task_del(sc->sc_taskq, &sc->sc_task);
 	taskq_destroy(sc->sc_taskq);
 	ieee80211_ifdetach(ifp);
 	if_detach(ifp);
+#endif
 	return 0;
 }
 
@@ -336,8 +421,10 @@ bwfm_start(struct ifnet *ifp)
 
 	if (!(ifp->if_flags & IFF_RUNNING))
 		return;
+#if defined(__OpenBSD__)
 	if (ifq_is_oactive(&ifp->if_snd))
 		return;
+#endif
 	if (IFQ_IS_EMPTY(&ifp->if_snd))
 		return;
 
@@ -345,16 +432,24 @@ bwfm_start(struct ifnet *ifp)
 
 	for (;;) {
 		if (sc->sc_bus_ops->bs_txcheck(sc)) {
+#if defined(__OpenBSD__)
 			ifq_set_oactive(&ifp->if_snd);
+#endif
 			break;
 		}
 
+#if defined(__OpenBSD__)
 		m = ifq_dequeue(&ifp->if_snd);
+#elif defined(__FreeBSD__)
+		IFQ_DRV_DEQUEUE(&ifp->if_snd, m);
+#endif
 		if (m == NULL)
 			break;
 
 		if (sc->sc_bus_ops->bs_txdata(sc, m) != 0) {
+#if defined(__OpenBSD__)
 			ifp->if_oerrors++;
+#endif
 			m_freem(m);
 			continue;
 		}
@@ -389,7 +484,9 @@ bwfm_init(struct ifnet *ifp)
 	}
 
 	/* Select default channel */
+#if defined(__OpenBSD__)
 	ic->ic_bss->ni_chan = ic->ic_ibss_chan;
+#endif
 
 	if (bwfm_fwvar_var_set_int(sc, "mpc", 1)) {
 		printf("%s: could not set mpc\n", DEVNAME(sc));
@@ -500,24 +597,32 @@ bwfm_init(struct ifnet *ifp)
 #endif
 
 	ifp->if_flags |= IFF_RUNNING;
+#if defined(__OpenBSD__)
 	ifq_clr_oactive(&ifp->if_snd);
 
 	ieee80211_begin_scan(ifp);
+#endif
 }
 
 void
 bwfm_stop(struct ifnet *ifp)
 {
 	struct bwfm_softc *sc = ifp->if_softc;
+#if defined(__OpenBSD__)
 	struct ieee80211com *ic = &sc->sc_ic;
+#endif
 	struct bwfm_join_params join;
 
 	sc->sc_tx_timer = 0;
+#if defined(__OpenBSD__)
 	ifp->if_timer = 0;
+#endif
 	ifp->if_flags &= ~IFF_RUNNING;
+#if defined(__OpenBSD__)
 	ifq_clr_oactive(&ifp->if_snd);
 
 	ieee80211_new_state(ic, IEEE80211_S_INIT, -1);
+#endif
 
 	memset(&join, 0, sizeof(join));
 	bwfm_fwvar_cmd_set_data(sc, BWFM_C_SET_SSID, &join, sizeof(join));
@@ -536,17 +641,25 @@ bwfm_watchdog(struct ifnet *ifp)
 {
 	struct bwfm_softc *sc = ifp->if_softc;
 
+#if defined(__OpenBSD__)
 	ifp->if_timer = 0;
+#endif
 
 	if (sc->sc_tx_timer > 0) {
 		if (--sc->sc_tx_timer == 0) {
 			printf("%s: device timeout\n", DEVNAME(sc));
+#if defined(__OpenBSD__)
 			ifp->if_oerrors++;
+#endif
 			return;
 		}
+#if defined(__OpenBSD__)
 		ifp->if_timer = 1;
+#endif
 	}
+#if defined(__OpenBSD__)
 	ieee80211_watchdog(ifp);
+#endif
 }
 
 int
@@ -1309,7 +1422,11 @@ bwfm_proto_bcdc_query_dcmd(struct bwfm_softc *sc, int ifidx,
 		ret = dcmd->hdr.status;
 	else
 		ret = 0;
+#if defined(__OpenBSD__)
 	free(dcmd, M_TEMP, size);
+#elif defined(__FreeBSD__)
+	free(dcmd, M_TEMP);
+#endif
 	return ret;
 }
 
@@ -1344,7 +1461,11 @@ bwfm_proto_bcdc_set_dcmd(struct bwfm_softc *sc, int ifidx,
 		ret = dcmd->hdr.status;
 	else
 		ret = 0;
+#if defined(__OpenBSD__)
 	free(dcmd, M_TEMP, size);
+#elif defined(__FreeBSD__)
+	free(dcmd, M_TEMP);
+#endif
 	return ret;
 }
 
@@ -1373,15 +1494,24 @@ bwfm_proto_bcdc_txctl(struct bwfm_softc *sc, int reqid, char *buf, size_t *len)
 		if (ctl->done) {
 			TAILQ_REMOVE(&sc->sc_bcdc_rxctlq, ctl, next);
 			*len = ctl->len;
+#if defined(__OpenBSD__)
 			free(ctl, M_TEMP, sizeof(*ctl));
+#elif defined(__FreeBSD__)
+			free(ctl, M_TEMP);
+#endif
 			return 0;
 		}
 		if (timeout) {
 			TAILQ_REMOVE(&sc->sc_bcdc_rxctlq, ctl, next);
 			DPRINTF(("%s: timeout waiting for txctl response\n",
 			    DEVNAME(sc)));
+#if defined(__OpenBSD__)
 			free(ctl->buf, M_TEMP, ctl->len);
 			free(ctl, M_TEMP, sizeof(*ctl));
+#elif defined(__FreeBSD__)
+			free(ctl->buf, M_TEMP);
+			free(ctl, M_TEMP);
+#endif
 			return 1;
 		}
 		break;
@@ -1411,8 +1541,13 @@ bwfm_proto_bcdc_rxctl(struct bwfm_softc *sc, char *buf, size_t len)
 		if (ctl->reqid != BWFM_BCDC_DCMD_ID_GET(dcmd->hdr.flags))
 			continue;
 		if (ctl->len != len) {
+#if defined(__OpenBSD__)
 			free(ctl->buf, M_TEMP, ctl->len);
 			free(ctl, M_TEMP, sizeof(*ctl));
+#elif defined(__FreeBSD__)
+			free(ctl->buf, M_TEMP);
+			free(ctl, M_TEMP);
+#endif
 			return;
 		}
 		memcpy(ctl->buf, buf, len);
@@ -1482,7 +1617,11 @@ bwfm_fwvar_var_get_data(struct bwfm_softc *sc, char *name, void *data, size_t le
 	ret = bwfm_fwvar_cmd_get_data(sc, BWFM_C_GET_VAR,
 	    buf, strlen(name) + 1 + len);
 	memcpy(data, buf, len);
+#if defined(__OpenBSD__)
 	free(buf, M_TEMP, strlen(name) + 1 + len);
+#elif defined(__FreeBSD__)
+	free(buf, M_TEMP);
+#endif
 	return ret;
 }
 
@@ -1497,7 +1636,11 @@ bwfm_fwvar_var_set_data(struct bwfm_softc *sc, char *name, void *data, size_t le
 	memcpy(buf + strlen(name) + 1, data, len);
 	ret = bwfm_fwvar_cmd_set_data(sc, BWFM_C_SET_VAR,
 	    buf, strlen(name) + 1 + len);
+#if defined(__OpenBSD__)
 	free(buf, M_TEMP, strlen(name) + 1 + len);
+#elif defined(__FreeBSD__)
+	free(buf, M_TEMP);
+#endif
 	return ret;
 }
 
@@ -1644,6 +1787,7 @@ bwfm_spec2chan_d11ac(struct bwfm_softc *sc, uint32_t chanspec)
 void
 bwfm_connect(struct bwfm_softc *sc)
 {
+#if defined(__OpenBSD__)
 	struct ieee80211com *ic = &sc->sc_ic;
 	struct bwfm_ext_join_params *params;
 	uint8_t buf[64];	/* XXX max WPA/RSN/WMM IE length */
@@ -1719,14 +1863,20 @@ bwfm_connect(struct bwfm_softc *sc)
 			bwfm_fwvar_cmd_set_data(sc, BWFM_C_SET_SSID, &join,
 			    sizeof(join));
 		}
+#if defined(__OpenBSD__)
 		free(params, M_TEMP, sizeof(*params));
+#elif defined(__FreeBSD__)
+		free(params, M_TEMP);
+#endif
 	}
+#endif
 }
 
 #ifndef IEEE80211_STA_ONLY
 void
 bwfm_hostap(struct bwfm_softc *sc)
 {
+#if defined(__OpenBSD__)
 	struct ieee80211com *ic = &sc->sc_ic;
 	struct ieee80211_node *ni = ic->ic_bss;
 	struct bwfm_join_params join;
@@ -1789,6 +1939,7 @@ bwfm_hostap(struct bwfm_softc *sc)
 	bwfm_fwvar_cmd_set_data(sc, BWFM_C_SET_SSID, &join, sizeof(join));
 	bwfm_fwvar_var_set_int(sc, "closednet",
 	    (ic->ic_flags & IEEE80211_F_HIDENWID) != 0);
+#endif
 }
 #endif
 
@@ -1830,7 +1981,11 @@ bwfm_scan(struct bwfm_softc *sc)
 #endif
 
 	bwfm_fwvar_var_set_data(sc, "escan", params, params_size);
+#if defined(__OpenBSD__)
 	free(params, M_TEMP, params_size);
+#elif defined(__FreeBSD__)
+	free(params, M_TEMP);
+#endif
 }
 
 struct mbuf *
@@ -1856,10 +2011,12 @@ bwfm_newbuf(void)
 void
 bwfm_rx(struct bwfm_softc *sc, struct mbuf *m)
 {
+#if defined(__OpenBSD__)
 	struct ieee80211com *ic = &sc->sc_ic;
 	struct ifnet *ifp = &ic->ic_if;
 	struct mbuf_list ml = MBUF_LIST_INITIALIZER();
 	struct ieee80211_node *ni;
+#endif
 	struct bwfm_event *e;
 
 #ifdef __STRICT_ALIGNMENT
@@ -1869,7 +2026,9 @@ bwfm_rx(struct bwfm_softc *sc, struct mbuf *m)
 		m0 = m_dup_pkt(m, ETHER_ALIGN, M_WAITOK);
 		m_freem(m);
 		if (m0 == NULL) {
+#if defined(__OpenBSD__)
 			ifp->if_ierrors++;
+#endif
 			return;
 		}
 		m = m0;
@@ -1886,15 +2045,20 @@ bwfm_rx(struct bwfm_softc *sc, struct mbuf *m)
 	}
 
 	/* Drop network packets if we are not in RUN state. */
+#if defined(__OpenBSD__)
 	if (ic->ic_state != IEEE80211_S_RUN) {
 		m_freem(m);
 		return;
 	}
+#endif
 
+#if defined(__OpenBSD__)
 	if ((ic->ic_flags & IEEE80211_F_RSNON) &&
 	    m->m_len >= sizeof(e->ehdr) &&
 	    ntohs(e->ehdr.ether_type) == ETHERTYPE_PAE) {
+#if defined(__OpenBSD__)
 		ifp->if_ipackets++;
+#endif
 #if NBPFILTER > 0
 		if (ifp->if_bpf)
 			bpf_mtap(ifp->if_bpf, m, BPF_DIRECTION_IN);
@@ -1910,20 +2074,27 @@ bwfm_rx(struct bwfm_softc *sc, struct mbuf *m)
 		} else
 #endif
 			ni = ic->ic_bss;
+#if defined(__OpenBSD__)
 		ieee80211_eapol_key_input(ic, m, ni);
+#endif
 	} else {
+#if defined(__OpenBSD__)
 		ml_enqueue(&ml, m);
 		if_input(ifp, &ml);
+#endif
 	}
+#endif
 }
 
 #ifndef IEEE80211_STA_ONLY
 void
 bwfm_rx_auth_ind(struct bwfm_softc *sc, struct bwfm_event *e, size_t len)
 {
+#if defined(__OpenBSD__)
 	struct ieee80211com *ic = &sc->sc_ic;
 	struct ifnet *ifp = &ic->ic_if;
 	struct ieee80211_rxinfo rxi;
+#endif
 	struct ieee80211_frame *wh;
 	struct mbuf *m;
 	uint32_t pktlen, ieslen;
@@ -1941,9 +2112,15 @@ bwfm_rx_auth_ind(struct bwfm_softc *sc, struct bwfm_event *e, size_t len)
 	    IEEE80211_FC0_SUBTYPE_AUTH;
 	wh->i_fc[1] = IEEE80211_FC1_DIR_NODS;
 	*(uint16_t *)wh->i_dur = 0;
+#if defined(__OpenBSD__)
 	IEEE80211_ADDR_COPY(wh->i_addr1, etherbroadcastaddr);
+#elif defined(__FreeBSD__)
+	IEEE80211_ADDR_COPY(wh->i_addr1, ieee80211broadcastaddr);
+#endif
 	IEEE80211_ADDR_COPY(wh->i_addr2, &e->msg.addr);
+#if defined(__OpenBSD__)
 	IEEE80211_ADDR_COPY(wh->i_addr3, ic->ic_bss->ni_bssid);
+#endif
 	*(uint16_t *)wh->i_seq = 0;
 	((uint16_t *)(&wh[1]))[0] = IEEE80211_AUTH_ALG_OPEN;
 	((uint16_t *)(&wh[1]))[1] = IEEE80211_AUTH_OPEN_REQUEST;
@@ -1951,21 +2128,27 @@ bwfm_rx_auth_ind(struct bwfm_softc *sc, struct bwfm_event *e, size_t len)
 
 	/* Finalize mbuf. */
 	m->m_pkthdr.len = m->m_len = pktlen;
+#if defined(__OpenBSD__)
 	rxi.rxi_flags = 0;
 	rxi.rxi_rssi = 0;
 	rxi.rxi_tstamp = 0;
 	ieee80211_input(ifp, m, ic->ic_bss, &rxi);
+#endif
 }
 
 void
 bwfm_rx_assoc_ind(struct bwfm_softc *sc, struct bwfm_event *e, size_t len,
     int reassoc)
 {
+#if defined(__OpenBSD__)
 	struct ieee80211com *ic = &sc->sc_ic;
 	struct ifnet *ifp = &ic->ic_if;
 	struct ieee80211_rxinfo rxi;
+#endif
 	struct ieee80211_frame *wh;
+#if defined(__OpenBSD__)
 	struct ieee80211_node *ni;
+#endif
 	struct mbuf *m;
 	uint32_t pktlen, ieslen;
 
@@ -1987,9 +2170,15 @@ bwfm_rx_assoc_ind(struct bwfm_softc *sc, struct bwfm_event *e, size_t len,
 	    wh->i_fc[0] |= IEEE80211_FC0_SUBTYPE_ASSOC_REQ;
 	wh->i_fc[1] = IEEE80211_FC1_DIR_NODS;
 	*(uint16_t *)wh->i_dur = 0;
+#if defined(__OpenBSD__)
 	IEEE80211_ADDR_COPY(wh->i_addr1, etherbroadcastaddr);
+#elif defined(__FreeBSD__)
+	IEEE80211_ADDR_COPY(wh->i_addr1, ieee80211broadcastaddr);
+#endif
 	IEEE80211_ADDR_COPY(wh->i_addr2, &e->msg.addr);
+#if defined(__OpenBSD__)
 	IEEE80211_ADDR_COPY(wh->i_addr3, ic->ic_bss->ni_bssid);
+#endif
 	*(uint16_t *)wh->i_seq = 0;
 	((uint16_t *)(&wh[1]))[0] = IEEE80211_CAPINFO_ESS; /* XXX */
 	((uint16_t *)(&wh[1]))[1] = 100; /* XXX */
@@ -2002,6 +2191,7 @@ bwfm_rx_assoc_ind(struct bwfm_softc *sc, struct bwfm_event *e, size_t len,
 
 	/* Finalize mbuf. */
 	m->m_pkthdr.len = m->m_len = pktlen;
+#if defined(__OpenBSD__)
 	ni = ieee80211_find_node(ic, wh->i_addr2);
 	if (ni == NULL) {
 		m_free(m);
@@ -2011,6 +2201,7 @@ bwfm_rx_assoc_ind(struct bwfm_softc *sc, struct bwfm_event *e, size_t len,
 	rxi.rxi_rssi = 0;
 	rxi.rxi_tstamp = 0;
 	ieee80211_input(ifp, m, ni, &rxi);
+#endif
 }
 
 void
@@ -2029,11 +2220,15 @@ void
 bwfm_rx_leave_ind(struct bwfm_softc *sc, struct bwfm_event *e, size_t len,
     int subtype)
 {
+#if defined(__OpenBSD__)
 	struct ieee80211com *ic = &sc->sc_ic;
 	struct ifnet *ifp = &ic->ic_if;
 	struct ieee80211_rxinfo rxi;
+#endif
 	struct ieee80211_frame *wh;
+#if defined(__OpenBSD__)
 	struct ieee80211_node *ni;
+#endif
 	struct mbuf *m;
 	uint32_t pktlen;
 
@@ -2049,14 +2244,21 @@ bwfm_rx_leave_ind(struct bwfm_softc *sc, struct bwfm_event *e, size_t len,
 	    subtype;
 	wh->i_fc[1] = IEEE80211_FC1_DIR_NODS;
 	*(uint16_t *)wh->i_dur = 0;
+#if defined(__OpenBSD__)
 	IEEE80211_ADDR_COPY(wh->i_addr1, etherbroadcastaddr);
+#elif defined(__FreeBSD__)
+	IEEE80211_ADDR_COPY(wh->i_addr1, ieee80211broadcastaddr);
+#endif
 	IEEE80211_ADDR_COPY(wh->i_addr2, &e->msg.addr);
+#if defined(__OpenBSD__)
 	IEEE80211_ADDR_COPY(wh->i_addr3, ic->ic_bss->ni_bssid);
+#endif
 	*(uint16_t *)wh->i_seq = 0;
 	memset((uint8_t *)&wh[1], 0, 2);
 
 	/* Finalize mbuf. */
 	m->m_pkthdr.len = m->m_len = pktlen;
+#if defined(__OpenBSD__)
 	ni = ieee80211_find_node(ic, wh->i_addr2);
 	if (ni == NULL) {
 		m_free(m);
@@ -2066,6 +2268,7 @@ bwfm_rx_leave_ind(struct bwfm_softc *sc, struct bwfm_event *e, size_t len,
 	rxi.rxi_rssi = 0;
 	rxi.rxi_tstamp = 0;
 	ieee80211_input(ifp, m, ni, &rxi);
+#endif
 }
 #endif
 
@@ -2081,8 +2284,10 @@ bwfm_rx_event(struct bwfm_softc *sc, struct mbuf *m)
 void
 bwfm_rx_event_cb(struct bwfm_softc *sc, void *arg)
 {
+#if defined(__OpenBSD__)
 	struct ieee80211com *ic = &sc->sc_ic;
 	struct ifnet *ifp = &ic->ic_if;
+#endif
 	struct bwfm_cmd_mbuf *cmd = arg;
 	struct mbuf *m = cmd->m;
 	struct bwfm_event *e = mtod(m, void *);
@@ -2099,11 +2304,13 @@ bwfm_rx_event_cb(struct bwfm_softc *sc, void *arg)
 		struct bwfm_bss_info *bss;
 		size_t reslen;
 		int i;
+#if defined(__OpenBSD__)
 		if (ntohl(e->msg.status) != BWFM_E_STATUS_PARTIAL &&
 		    ic->ic_state == IEEE80211_S_SCAN) {
 			ieee80211_end_scan(ifp);
 			break;
 		}
+#endif
 		len -= sizeof(*e);
 		if (len < sizeof(*res)) {
 			DPRINTF(("%s: results too small\n", DEVNAME(sc)));
@@ -2115,14 +2322,22 @@ bwfm_rx_event_cb(struct bwfm_softc *sc, void *arg)
 		memcpy(res, (void *)&e[1], len);
 		if (len < letoh32(res->buflen)) {
 			DPRINTF(("%s: results too small\n", DEVNAME(sc)));
+#if defined(__OpenBSD__)
 			free(res, M_TEMP, reslen);
+#elif defined(__FreeBSD__)
+			free(res, M_TEMP);
+#endif
 			m_freem(m);
 			return;
 		}
 		len -= sizeof(*res);
 		if (len < letoh16(res->bss_count) * sizeof(struct bwfm_bss_info)) {
 			DPRINTF(("%s: results too small\n", DEVNAME(sc)));
+#if defined(__OpenBSD__)
 			free(res, M_TEMP, reslen);
+#elif defined(__FreeBSD__)
+			free(res, M_TEMP);
+#endif
 			m_freem(m);
 			return;
 		}
@@ -2130,43 +2345,62 @@ bwfm_rx_event_cb(struct bwfm_softc *sc, void *arg)
 		for (i = 0; i < letoh16(res->bss_count); i++) {
 			bwfm_scan_node(sc, &res->bss_info[i], len);
 			len -= sizeof(*bss) + letoh32(bss->length);
+#if defined(__OpenBSD__)
 			bss = (void *)((char *)bss) + letoh32(bss->length);
+#elif defined(__FreeBSD__)
+			bss = (struct bwfm_bss_info *)
+			    ((uintptr_t)(void *)bss + letoh32(bss->length));
+#endif
 			if (len <= 0)
 				break;
 		}
+#if defined(__OpenBSD__)
 		free(res, M_TEMP, reslen);
+#elif defined(__FreeBSD__)
+		free(res, M_TEMP);
+#endif
 		break;
 		}
 	case BWFM_E_SET_SSID:
+#if defined(__OpenBSD__)
 		if (ntohl(e->msg.status) != BWFM_E_STATUS_SUCCESS)
 			ieee80211_new_state(ic, IEEE80211_S_SCAN, -1);
+#endif
 		break;
 	case BWFM_E_AUTH:
+#if defined(__OpenBSD__)
 		if (ntohl(e->msg.status) == BWFM_E_STATUS_SUCCESS &&
 		    ic->ic_state == IEEE80211_S_AUTH)
 			ieee80211_new_state(ic, IEEE80211_S_ASSOC, -1);
 		else
 			ieee80211_new_state(ic, IEEE80211_S_SCAN, -1);
+#endif
 		break;
 	case BWFM_E_ASSOC:
+#if defined(__OpenBSD__)
 		if (ntohl(e->msg.status) == BWFM_E_STATUS_SUCCESS &&
 		    ic->ic_state == IEEE80211_S_ASSOC)
 			ieee80211_new_state(ic, IEEE80211_S_RUN, -1);
 		else
 			ieee80211_new_state(ic, IEEE80211_S_SCAN, -1);
+#endif
 		break;
 	case BWFM_E_DEAUTH:
 	case BWFM_E_DISASSOC:
+#if defined(__OpenBSD__)
 		if (ic->ic_state != IEEE80211_S_INIT)
 			ieee80211_new_state(ic, IEEE80211_S_SCAN, -1);
+#endif
 		break;
 	case BWFM_E_LINK:
 		if (ntohl(e->msg.status) == BWFM_E_STATUS_SUCCESS &&
 		    ntohl(e->msg.reason) == 0)
 			break;
 		/* Link status has changed */
+#if defined(__OpenBSD__)
 		if (ic->ic_state != IEEE80211_S_INIT)
 			ieee80211_new_state(ic, IEEE80211_S_SCAN, -1);
+#endif
 		break;
 #ifndef IEEE80211_STA_ONLY
 	case BWFM_E_AUTH_IND:
@@ -2199,11 +2433,15 @@ bwfm_rx_event_cb(struct bwfm_softc *sc, void *arg)
 void
 bwfm_scan_node(struct bwfm_softc *sc, struct bwfm_bss_info *bss, size_t len)
 {
+#if defined(__OpenBSD__)
 	struct ieee80211com *ic = &sc->sc_ic;
 	struct ifnet *ifp = &ic->ic_if;
+#endif
 	struct ieee80211_frame *wh;
+#if defined(__OpenBSD__)
 	struct ieee80211_node *ni;
 	struct ieee80211_rxinfo rxi;
+#endif
 	struct ieee80211_channel *bss_chan;
 	struct mbuf *m;
 	uint32_t pktlen, ieslen;
@@ -2227,7 +2465,11 @@ bwfm_scan_node(struct bwfm_softc *sc, struct bwfm_bss_info *bss, size_t len)
 	    IEEE80211_FC0_SUBTYPE_BEACON;
 	wh->i_fc[1] = IEEE80211_FC1_DIR_NODS;
 	*(uint16_t *)wh->i_dur = 0;
+#if defined(__OpenBSD__)
 	IEEE80211_ADDR_COPY(wh->i_addr1, etherbroadcastaddr);
+#elif defined(__FreeBSD__)
+	IEEE80211_ADDR_COPY(wh->i_addr1, ieee80211broadcastaddr);
+#endif
 	IEEE80211_ADDR_COPY(wh->i_addr2, bss->bssid);
 	IEEE80211_ADDR_COPY(wh->i_addr3, bss->bssid);
 	*(uint16_t *)wh->i_seq = 0;
@@ -2238,16 +2480,21 @@ bwfm_scan_node(struct bwfm_softc *sc, struct bwfm_bss_info *bss, size_t len)
 
 	/* Finalize mbuf. */
 	m->m_pkthdr.len = m->m_len = pktlen;
+#if defined(__OpenBSD__)
 	ni = ieee80211_find_rxnode(ic, wh);
+#endif
 	/*
 	 * We may switch ic_bss's channel during scans.
 	 * Record the current channel so we can restore it later.
 	 */
 	bss_chan = NULL;
+#if defined(__OpenBSD__)
 	if (ni == ic->ic_bss)
 		bss_chan = ni->ni_chan;
+#endif
 	/* Channel mask equals IEEE80211_CHAN_MAX */
 	chanidx = bwfm_spec2chan(sc, letoh32(bss->chanspec));
+#if defined(__OpenBSD__)
 	ni->ni_chan = &ic->ic_channels[chanidx];
 	/* Supply RSSI */
 	rxi.rxi_flags = 0;
@@ -2259,6 +2506,7 @@ bwfm_scan_node(struct bwfm_softc *sc, struct bwfm_bss_info *bss, size_t len)
 		ni->ni_chan = bss_chan;
 	/* Node is no longer needed. */
 	ieee80211_release_node(ic, ni);
+#endif
 }
 
 void
@@ -2296,11 +2544,18 @@ bwfm_do_async(struct bwfm_softc *sc,
 	}
 	cmd = &ring->cmd[ring->cur];
 	cmd->cb = cb;
+#if defined(__OpenBSD__)
 	KASSERT(len <= sizeof(cmd->data));
+#elif defined(__FreeBBSD__)
+	KASSERT((len <= sizeof(cmd->data)),
+	    ("%s: len %d > %sz", __func__, len, sizeof(cmd->data)));
+#endif
 	memcpy(cmd->data, arg, len);
 	ring->cur = (ring->cur + 1) % BWFM_HOST_CMD_RING_COUNT;
 	ring->queued++;
+#if defined(__OpenBSD__)
 	task_add(sc->sc_taskq, &sc->sc_task);
+#endif
 	splx(s);
 }
 
@@ -2331,6 +2586,7 @@ bwfm_set_key(struct ieee80211com *ic, struct ieee80211_node *ni,
 void
 bwfm_set_key_cb(struct bwfm_softc *sc, void *arg)
 {
+#if defined(__OpenBSD__)
 	struct bwfm_cmd_key *cmd = arg;
 	struct ieee80211_key *k = cmd->k;
 	struct ieee80211_node *ni = cmd->ni;
@@ -2379,6 +2635,7 @@ bwfm_set_key_cb(struct bwfm_softc *sc, void *arg)
 	bwfm_fwvar_var_get_int(sc, "wsec", &wsec);
 	wsec |= wsec_enable;
 	bwfm_fwvar_var_set_int(sc, "wsec", wsec);
+#endif
 }
 
 void
@@ -2396,12 +2653,16 @@ bwfm_delete_key(struct ieee80211com *ic, struct ieee80211_node *ni,
 void
 bwfm_delete_key_cb(struct bwfm_softc *sc, void *arg)
 {
+#if defined(__OpenBSD__)
 	struct bwfm_cmd_key *cmd = arg;
 	struct ieee80211_key *k = cmd->k;
+#endif
 	struct bwfm_wsec_key key;
 
 	memset(&key, 0, sizeof(key));
+#if defined(__OpenBSD__)
 	key.index = htole32(k->k_id);
+#endif
 	key.flags = htole32(BWFM_WSEC_PRIMARY_KEY);
 	bwfm_fwvar_var_set_data(sc, "wsec_key", &key, sizeof(key));
 }
@@ -2410,7 +2671,9 @@ int
 bwfm_newstate(struct ieee80211com *ic, enum ieee80211_state nstate, int arg)
 {
 	struct bwfm_softc *sc = ic->ic_softc;
+#if defined(__OpenBSD__)
 	struct ifnet *ifp = &ic->ic_if;
+#endif
 	int s;
 
 	s = splnet();
@@ -2419,25 +2682,34 @@ bwfm_newstate(struct ieee80211com *ic, enum ieee80211_state nstate, int arg)
 	case IEEE80211_S_SCAN:
 #ifndef IEEE80211_STA_ONLY
 		/* Don't start a scan if we already have a channel. */
+#if defined(__OpenBSD__)
 		if (ic->ic_state == IEEE80211_S_INIT &&
 		    ic->ic_opmode == IEEE80211_M_HOSTAP &&
 		    ic->ic_des_chan != IEEE80211_CHAN_ANYC) {
 			break;
 		}
 #endif
+#endif
 		bwfm_scan(sc);
+#if defined(__OpenBSD__)
 		if (ifp->if_flags & IFF_DEBUG)
 			printf("%s: %s -> %s\n", DEVNAME(sc),
 			    ieee80211_state_name[ic->ic_state],
 			    ieee80211_state_name[nstate]);
 		ieee80211_set_link_state(ic, LINK_STATE_DOWN);
 		ieee80211_free_allnodes(ic, 1);
+#endif
+#if defined(__OpenBSD__)
 		ic->ic_state = nstate;
+#endif
 		splx(s);
 		return 0;
 	case IEEE80211_S_AUTH:
+#if defined(__OpenBSD__)
 		ic->ic_bss->ni_rsn_supp_state = RSNA_SUPP_INITIALIZE;
+#endif
 		bwfm_connect(sc);
+#if defined(__OpenBSD__)
 		if (ifp->if_flags & IFF_DEBUG)
 			printf("%s: %s -> %s\n", DEVNAME(sc),
 			    ieee80211_state_name[ic->ic_state],
@@ -2445,6 +2717,7 @@ bwfm_newstate(struct ieee80211com *ic, enum ieee80211_state nstate, int arg)
 		ic->ic_state = nstate;
 		if (ic->ic_flags & IEEE80211_F_RSNON)
 			ic->ic_bss->ni_rsn_supp_state = RSNA_SUPP_PTKSTART;
+#endif
 		splx(s);
 		return 0;
 #ifndef IEEE80211_STA_ONLY

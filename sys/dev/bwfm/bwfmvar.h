@@ -148,7 +148,11 @@ struct bwfm_proto_bcdc_ctl {
 };
 
 struct bwfm_softc {
+#if defined(__OpenBSD__)
 	struct device		 sc_dev;
+#elif defined(__FreeBSD__)
+	device_t		 sc_dev;
+#endif
 	struct ieee80211com	 sc_ic;
 	struct ifmedia		 sc_media;
 	struct bwfm_bus_ops	*sc_bus_ops;
