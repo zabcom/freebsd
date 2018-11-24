@@ -66,11 +66,6 @@
 #include <dev/bwfm/bwfmreg.h>
 #endif
 
-#if defined(__OpenBSD__)
-#define	BWFM_LOCK(sc)
-#define	BWFM_UNLOCK(sc)
-#define	BWFM_LOCK_ASSERT(sc)
-#elif defined(__FreeBSD__)
 struct ieee80211_nodereq;
 #define	IFF_RUNNING		IFF_DRV_RUNNING
 #define	letoh16(_x)		le16toh((_x))
@@ -81,10 +76,12 @@ struct ieee80211_nodereq;
 #define	M_DONTWAIT		M_NOWAIT
 #define	splsoftnet(_x)		0
 
+#define	BWFM_LOCK_INIT(_sc)	mtx_init(&(_sc)->sc_mtx, \
+    device_get_nameunit((_sc)->sc_dev), MTX_NETWORK_LOCK, MTX_DEF);
 #define	BWFM_LOCK(_sc)		mtx_lock(&(_sc)->sc_mtx)
 #define	BWFM_UNLOCK(_sc)	mtx_unlock(&(_sc)->sc_mtx)
 #define	BWFM_LOCK_ASSERT(_sc)	mtx_assert(&(_sc)->sc_mtx, MA_OWNED)
-#endif
+#define	BWFM_LOCK_DESTROY(_sc)	mtx_destroy(&(_sc)->sc_mtx)
 
 /* #define BWFM_DEBUG */
 #ifdef BWFM_DEBUG
@@ -164,7 +161,6 @@ void	 bwfm_hostap(struct bwfm_softc *);
 #endif
 void	 bwfm_scan(struct bwfm_softc *);
 
-void	 bwfm_task(void *);
 void	 bwfm_do_async(struct bwfm_softc *,
 	     void (*)(struct bwfm_softc *, void *), void *, int);
 
@@ -218,7 +214,6 @@ struct cfdriver bwfm_cd = {
 };
 #endif
 
-#if defined(__FreeBSD__)
 /* Dequeue packets from sendq and transmit. */
 static void
 bwfm_start(struct bwfm_softc *sc)
@@ -251,7 +246,7 @@ bwfm_transmit(struct ieee80211com *ic, struct mbuf *m)
 
 	sc = ic->ic_softc;
 	BWFM_LOCK(sc);
-	if ((sc->sc_flags & BWFM_FLAG_HW_INITALIZED) == 0) {
+	if ((sc->sc_state & BWFM_STATE_INITALIZED) == 0) {
 		BWFM_UNLOCK(sc);
 		return (ENXIO);
 	}
@@ -265,39 +260,280 @@ bwfm_transmit(struct ieee80211com *ic, struct mbuf *m)
 
 	return (0);
 }
-#endif
 
-void
-bwfm_attach(struct bwfm_softc *sc)
+static int
+bwfm_detach_local(struct bwfm_softc *sc)
 {
-	struct ieee80211com *ic = &sc->sc_ic;
-#if defined(__OpenBSD__)
-	struct ifnet *ifp = &ic->ic_if;
+
+	if ((sc->sc_state & BWFM_STATE_ATTACHED) == 0)
+		return (0);
+	sc->sc_state &= ~BWFM_STATE_ATTACHED;
+
+	if ((sc->sc_state & BWFM_STATE_INITALIZED) != 0)
+		ieee80211_draintask(&sc->sc_ic, &sc->sc_task);
+	callout_drain(&sc->sc_watchdog);
+#ifdef notyet
+	bwfm_stop_device(sc);
+	if ((sc->sc_state & BWFM_STATE_INITALIZED) != 0)
+		BWFM_LOCK(sc);
+		bwfm_drain_xmit_queue(sc);
+		BWFM_UNLOCK(sc);
+		ieee80211_ifdetach(&sc->sc_ic);
+	}
+
+	/* XXX-BZ TODO free all the allocated data from attach */
 #endif
 
-	TAILQ_INIT(&sc->sc_bcdc_rxctlq);
+	BWFM_LOCK_DESTROY(sc);
 
+	return (0);
+}
+
+int
+bwfm_detach(device_t dev)
+{
+	struct bwfm_softc *sc;
+
+	sc = device_get_softc(dev);
+	return (bwfm_detach_local(sc));
+}
+
+static int
+bwfm_init_bands(struct bwfm_softc *sc)
+{
+	uint32_t bandlist[3];
+	uint8_t bands[IEEE80211_MODE_BYTES];
+	struct ieee80211com *ic;
+	device_t dev;
+	int error, i, nbands, nmode, vhtmode;
+
+	BWFM_LOCK_ASSERT(sc);
+	dev = sc->sc_dev;
+	ic = &sc->sc_ic;
+
+	/* If we get an error back simply disable the feature. */
+	if (bwfm_fwvar_var_get_int(sc, "nmode", &nmode))
+		nmode = 0;
+	if (bwfm_fwvar_var_get_int(sc, "vhtmode", &vhtmode))
+		vhtmode = 0;
+
+	error = bwfm_fwvar_cmd_get_data(sc, BWFM_C_GET_BANDLIST, bandlist,
+	    sizeof(bandlist));
+	if (error != 0) {
+		device_printf(dev, "%s: couldn't get supported band list\n",
+		    __func__);
+		return (ENXIO);
+	}
+	/* The first element is the number of bands supported. */
+	nbands = letoh32(bandlist[0]);
+	KASSERT((nbands < nitems(bandlist)), ("%s: hardware supports too many "
+	    "bands: %u. Driver needs update!\n", __func__, nbands));
+
+	/* Populate the channels list. */
+	for (i = 1; i <= nbands && i < nitems(bandlist); i++) {
+		switch (le32toh(bandlist[i])) {
+		case BWFM_BAND_2G:
+			DPRINTF(("%s: 2G HT %d VHT %d\n",
+			    __func__, nmode, vhtmode));
+			memset(bands, 0, sizeof(bands));
+			setbit(bands, IEEE80211_MODE_11B);
+			setbit(bands, IEEE80211_MODE_11G);
+			if (nmode)
+				setbit(bands, IEEE80211_MODE_11NG);
+			error = ieee80211_add_channel_list_2ghz(ic->ic_channels,
+			    IEEE80211_CHAN_MAX, &ic->ic_nchans,
+			    bwfm_2ghz_channels, nitems(bwfm_2ghz_channels),
+			    bands, 0);
+			/*
+			 * XXX-BZ if HT40 is supported do we also need to tell
+			 * the fw to enable OBSS scanning ("obss_coex")?
+			 * ieee80211_add_channel_ht40();
+			 */
+			break;
+		case BWFM_BAND_5G:
+			DPRINTF(("%s: 5G HT %d VHT %d\n",
+			    __func__, nmode, vhtmode));
+			memset(bands, 0, sizeof(bands));
+			setbit(bands, IEEE80211_MODE_11A);
+			if (nmode)
+				setbit(bands, IEEE80211_MODE_11NA);
+			if (vhtmode)
+				setbit(bands, IEEE80211_MODE_VHT_5GHZ);
+			error = ieee80211_add_channel_list_5ghz(ic->ic_channels,
+			    IEEE80211_CHAN_MAX, &ic->ic_nchans,
+			    bwfm_5ghz_channels, nitems(bwfm_5ghz_channels),
+			    bands, 0);
+			break;
+		default:
+			/* We will simply ignore the band. */
+			device_printf(dev, "%s: unsupported band 0x%x\n",
+			    __func__, letoh32(bandlist[i]));
+			break;
+		}
+		if (error != 0)
+			return (error);
+	}
+
+	return (0);
+}
+
+static void
+bwfm_radiotap_attach(struct bwfm_softc *sc)
+{
+#ifdef notyet
+	struct ieee80211com *ic;
+
+	ic = &sc->sc_ic;
+
+	ieee80211_radiotap_attach(ic, ...);
+#endif
+}
+
+static void
+bwfm_preinit(void *arg)
+{
+	device_t dev;
+	struct ieee80211com *ic;
+	struct bwfm_softc *sc;
+	uint32_t tmp;
+	int error;
+
+	sc = (struct bwfm_softc *)arg;
+	BWFM_LOCK(sc);
+	dev = sc->sc_dev;
+
+	error = bwfm_fwvar_cmd_get_int(sc, BWFM_C_GET_VERSION, &tmp);
+	if (error != 0) {
+		device_printf(dev, "%s: could not read version\n", __func__);
+		goto fail_locked;
+	}
+	sc->sc_io_type = tmp;
+
+	ic = &sc->sc_ic;
+	error = bwfm_fwvar_var_get_data(sc, "cur_etheraddr", ic->ic_macaddr,
+	    sizeof(ic->ic_macaddr));
+	if (error != 0) {
+		device_printf(dev, "%s: could not read mac address\n",
+		    __func__);
+		goto fail_locked;
+	}
+
+	error = bwfm_init_bands(sc);
+	if (error != 0) {
+		device_printf(dev, "%s: failed to get bands and initialize "
+		    "channel list: %#x\n", __func__, error);
+		goto fail_locked;
+	}
+
+	BWFM_UNLOCK(sc);
+
+	/* Start setting up net80211 state. */
+	ieee80211_ifattach(ic);
+	ic->ic_transmit = bwfm_transmit;
+	/* XXX-BZ TODO setup ic->ic_* to local functions. */
+
+	bwfm_radiotap_attach(sc);
+	if (bootverbose)
+		ieee80211_announce(ic);
+	config_intrhook_disestablish(&sc->sc_preinit_hook);
+
+	sc->sc_state |= BWFM_STATE_INITALIZED;
+
+	return;
+
+fail_locked:
+	BWFM_UNLOCK(sc);
+	config_intrhook_disestablish(&sc->sc_preinit_hook);
+	bwfm_detach_local(sc);
+
+	return;
+}
+
+static void
+bwfm_task(void *arg, int pending)
+{
+	struct bwfm_softc *sc = arg;
+	struct bwfm_host_cmd_ring *ring = &sc->sc_cmdq;
+	struct bwfm_host_cmd *cmd;
+	int s;
+
+	s = splsoftnet();
+	while (ring->next != ring->cur) {
+		cmd = &ring->cmd[ring->next];
+		splx(s);
+		cmd->cb(sc, cmd->data);
+		s = splsoftnet();
+		ring->queued--;
+		ring->next = (ring->next + 1) % BWFM_HOST_CMD_RING_COUNT;
+	}
+	splx(s);
+}
+
+int
+bwfm_attach(device_t dev)
+{
+	struct bwfm_softc *sc;
+	struct ieee80211com *ic;
+
+	sc = device_get_softc(dev);
+	sc->sc_dev = dev;
+
+	BWFM_LOCK_INIT(sc);
+	mbufq_init(&sc->sc_snd, ifqmaxlen);
+	TAILQ_INIT(&sc->sc_bcdc_rxctlq);
+	callout_init_mtx(&sc->sc_watchdog, &sc->sc_mtx, 0);
 	/* Init host async commands ring. */
 	sc->sc_cmdq.cur = sc->sc_cmdq.next = sc->sc_cmdq.queued = 0;
-#if defined(__OpenBSD__)
-	sc->sc_taskq = taskq_create(DEVNAME(sc), 1, IPL_SOFTNET, 0);
-	task_set(&sc->sc_task, bwfm_task, sc);
-#endif
+	TASK_INIT(&sc->sc_task, 0, bwfm_task, sc);
 
+	/* XXX-BZ TODO FIXME allocate all kinds of resources. */
+	/* XXX-BZ need to figure out where OpenBSD does that. */
+	/* XXX-BZ we do want to make sure we manage to do that before
+	 * also attaching to net80211 state to simplify error handling. */
+
+	ic = &sc->sc_ic;
+	ic->ic_softc = ic;
+	ic->ic_name = device_get_nameunit(sc->sc_dev);
 	ic->ic_phytype = IEEE80211_T_OFDM;	/* not only, but not used */
 	ic->ic_opmode = IEEE80211_M_STA;	/* default to BSS mode */
+
+	/* Set device capabilties. */
+	ic->ic_caps =
+	    IEEE80211_C_STA |
+#ifndef IEEE80211_STA_ONLY
+	    IEEE80211_C_HOSTAP |
+#endif
+#if 0
+	    IEEE80211_C_WME |
+	    IEEE80211_C_PMGT |
+#endif
+	    IEEE80211_C_WPA 			/* WPA/RSN */
+	    ;
+
+	/* Advertise full-offload scanning. */
+	ic->ic_flags_ext = IEEE80211_FEXT_SCAN_OFFLOAD;
+
+	sc->sc_state |= BWFM_STATE_ATTACHED;
+	/* After this we are "hot". */
+	/* Call preinit at the appropriate time. */
+	sc->sc_preinit_hook.ich_func = bwfm_preinit;
+	sc->sc_preinit_hook.ich_arg = sc;
+	if (config_intrhook_establish(&sc->sc_preinit_hook) != 0) {
+		device_printf(dev, "config_intrhook_establish failed\n");
+		goto fail;
+	}
+
+	return (0);
+
+fail:
+	bwfm_detach_local(sc);
+	return (ENXIO);
+}
+
+#if 0
+	/* bwfm_attach() */
 #if defined(__OpenBSD__)
 	ic->ic_state = IEEE80211_S_INIT;
-#endif
-
-#if defined(__OpenBSD__)
-	ic->ic_caps =
-#ifndef IEEE80211_STA_ONLY
-	    IEEE80211_C_HOSTAP |	/* Access Point */
-#endif
-	    IEEE80211_C_RSN | 		/* WPA/RSN */
-	    IEEE80211_C_SCANALL |	/* device scans all channels at once */
-	    IEEE80211_C_SCANALLBAND;	/* device scans all bands at once */
 #endif
 
 	/* IBSS channel undefined for now. */
@@ -334,157 +570,7 @@ bwfm_attach(struct bwfm_softc *sc)
 #if defined(__OpenBSD__)
 	ieee80211_media_init(ifp, bwfm_media_change, ieee80211_media_status);
 #endif
-}
-
-void
-#if defined(__OpenBSD__)
-bwfm_attachhook(struct device *self)
-#elif defined(__FreeBSD__)
-bwfm_attachhook(device_t self)
-#endif
-{
-	struct bwfm_softc *sc = (struct bwfm_softc *)self;
-
-	if (sc->sc_bus_ops->bs_preinit != NULL &&
-	    sc->sc_bus_ops->bs_preinit(sc))
-		return;
-	if (bwfm_preinit(sc))
-		return;
-	sc->sc_initialized = 1;
-}
-
-int
-bwfm_preinit(struct bwfm_softc *sc)
-{
-	struct ieee80211com *ic = &sc->sc_ic;
-#if defined(__OpenBSD__)
-	struct ifnet *ifp = &ic->ic_if;
-#endif
-	int i, j, nbands, nmode, vhtmode;
-	uint32_t bandlist[3], tmp;
-
-	if (sc->sc_initialized)
-		return 0;
-
-	if (bwfm_fwvar_cmd_get_int(sc, BWFM_C_GET_VERSION, &tmp)) {
-		printf("%s: could not read io type\n", DEVNAME(sc));
-		return 1;
-	} else
-		sc->sc_io_type = tmp;
-#if defined(__OpenBSD__)
-	if (bwfm_fwvar_var_get_data(sc, "cur_etheraddr", ic->ic_myaddr,
-	    sizeof(ic->ic_myaddr))) {
-#elif defined(__FreeBSD__)
-	if (bwfm_fwvar_var_get_data(sc, "cur_etheraddr", ic->ic_macaddr,
-	    sizeof(ic->ic_macaddr))) {
-#endif
-		printf("%s: could not read mac address\n", DEVNAME(sc));
-		return 1;
-	}
-
-	if (bwfm_fwvar_var_get_int(sc, "nmode", &nmode))
-		nmode = 0;
-	if (bwfm_fwvar_var_get_int(sc, "vhtmode", &vhtmode))
-		vhtmode = 0;
-	if (bwfm_fwvar_cmd_get_data(sc, BWFM_C_GET_BANDLIST, bandlist,
-	    sizeof(bandlist))) {
-		printf("%s: couldn't get supported band list\n", DEVNAME(sc));
-		return 1;
-	}
-	nbands = letoh32(bandlist[0]);
-	for (i = 1; i <= nbands && i < nitems(bandlist); i++) {
-		switch (letoh32(bandlist[i])) {
-		case BWFM_BAND_2G:
-			DPRINTF(("%s: 2G HT %d VHT %d\n",
-			    DEVNAME(sc), nmode, vhtmode));
-#if defined(__OpenBSD__)
-			ic->ic_sup_rates[IEEE80211_MODE_11B] =
-			    ieee80211_std_rateset_11b;
-			ic->ic_sup_rates[IEEE80211_MODE_11G] =
-			    ieee80211_std_rateset_11g;
-#endif
-
-			for (j = 0; j < nitems(bwfm_2ghz_channels); j++) {
-				uint8_t chan = bwfm_2ghz_channels[j];
-				ic->ic_channels[chan].ic_freq =
-				    ieee80211_ieee2mhz(chan, IEEE80211_CHAN_2GHZ);
-				ic->ic_channels[chan].ic_flags =
-				    IEEE80211_CHAN_CCK | IEEE80211_CHAN_OFDM |
-				    IEEE80211_CHAN_DYN | IEEE80211_CHAN_2GHZ;
-				if (nmode)
-					ic->ic_channels[chan].ic_flags |=
-					    IEEE80211_CHAN_HT;
-			}
-			break;
-		case BWFM_BAND_5G:
-			DPRINTF(("%s: 5G HT %d VHT %d\n",
-			    DEVNAME(sc), nmode, vhtmode));
-#if defined(__OpenBSD__)
-			ic->ic_sup_rates[IEEE80211_MODE_11A] =
-			    ieee80211_std_rateset_11a;
-#endif
-
-			for (j = 0; j < nitems(bwfm_5ghz_channels); j++) {
-				uint8_t chan = bwfm_5ghz_channels[j];
-				ic->ic_channels[chan].ic_freq =
-				    ieee80211_ieee2mhz(chan, IEEE80211_CHAN_5GHZ);
-				ic->ic_channels[chan].ic_flags =
-				    IEEE80211_CHAN_A;
-				if (nmode)
-					ic->ic_channels[chan].ic_flags |=
-					    IEEE80211_CHAN_HT;
-			}
-			break;
-		default:
-			printf("%s: unsupported band 0x%x\n", DEVNAME(sc),
-			    letoh32(bandlist[i]));
-			break;
-		}
-	}
-
-	/* Configure channel information obtained from firmware. */
-#if defined(__OpenBSD__)
-	ieee80211_channel_init(ifp);
-#elif defined(__FreeBSD__)
-	ieee80211_chan_init(ic);
-#endif
-
-	/* Configure MAC address. */
-#if defined(__OpenBSD__)
-	if (if_setlladdr(ifp, ic->ic_myaddr))
-#elif defined(__FreeBSD__)
-#ifdef TODO
-	if (if_setlladdr(ifp, ic->ic_macaddr))
-#endif
-#endif
-		printf("%s: could not set MAC address\n", DEVNAME(sc));
-
-#if defined(__OpenBSD__)
-	ieee80211_media_init(ifp, bwfm_media_change, ieee80211_media_status);
-#elif defined(__FreeBSD__)
-#ifdef TODO
-	ieee80211_vap_attach(vap, iwm_media_change, ieee80211_media_status,
-	    mac);
-#endif
-#endif
-
-	return 0;
-}
-
-int
-bwfm_detach(struct bwfm_softc *sc, int flags)
-{
-#if defined(__OpenBSD__)
-	struct ieee80211com *ic = &sc->sc_ic;
-	struct ifnet *ifp = &ic->ic_if;
-
-	task_del(sc->sc_taskq, &sc->sc_task);
-	taskq_destroy(sc->sc_taskq);
-	ieee80211_ifdetach(ifp);
-	if_detach(ifp);
-#endif
-	return 0;
-}
+#endif /* 0 */
 
 #if defined(__OpenBSD__)
 void
@@ -535,6 +621,7 @@ bwfm_init(struct ifnet *ifp)
 	struct bwfm_join_pref_params join_pref[2];
 	int pm;
 
+#if defined(__OpenBSD__)
 	if (!sc->sc_initialized) {
 		if (sc->sc_bus_ops->bs_preinit != NULL &&
 		    sc->sc_bus_ops->bs_preinit(sc)) {
@@ -549,7 +636,6 @@ bwfm_init(struct ifnet *ifp)
 	}
 
 	/* Select default channel */
-#if defined(__OpenBSD__)
 	ic->ic_bss->ni_chan = ic->ic_ibss_chan;
 #endif
 
@@ -2590,26 +2676,6 @@ bwfm_scan_node(struct bwfm_softc *sc, struct bwfm_bss_info *bss, size_t len)
 	/* Node is no longer needed. */
 	ieee80211_release_node(ic, ni);
 #endif
-}
-
-void
-bwfm_task(void *arg)
-{
-	struct bwfm_softc *sc = arg;
-	struct bwfm_host_cmd_ring *ring = &sc->sc_cmdq;
-	struct bwfm_host_cmd *cmd;
-	int s;
-
-	s = splsoftnet();
-	while (ring->next != ring->cur) {
-		cmd = &ring->cmd[ring->next];
-		splx(s);
-		cmd->cb(sc, cmd->data);
-		s = splsoftnet();
-		ring->queued--;
-		ring->next = (ring->next + 1) % BWFM_HOST_CMD_RING_COUNT;
-	}
-	splx(s);
 }
 
 void

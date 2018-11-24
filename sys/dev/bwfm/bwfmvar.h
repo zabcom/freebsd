@@ -148,16 +148,18 @@ struct bwfm_proto_bcdc_ctl {
 };
 
 struct bwfm_softc {
-#if defined(__OpenBSD__)
-	struct device		 sc_dev;
-#elif defined(__FreeBSD__)
 	device_t		 sc_dev;
 	struct mtx		 sc_mtx;
 	struct mbufq		 sc_snd;
 	int			 qfullmsk;
-	uint32_t		 sc_flags;
-#define	BWFM_FLAG_HW_INITALIZED		0x00000001
-#endif
+	uint32_t		 sc_state;
+#define	BWFM_STATE_ATTACHED		0x00000001
+#define	BWFM_STATE_INITALIZED		0x00000002
+	struct intr_config_hook	sc_preinit_hook;
+	struct callout		sc_watchdog;
+
+
+
 	struct ieee80211com	 sc_ic;
 	struct ifmedia		 sc_media;
 	struct bwfm_bus_ops	*sc_bus_ops;
@@ -181,10 +183,11 @@ struct bwfm_softc {
 	TAILQ_HEAD(, bwfm_proto_bcdc_ctl) sc_bcdc_rxctlq;
 };
 
-void bwfm_attach(struct bwfm_softc *);
-void bwfm_attachhook(struct device *);
-int bwfm_preinit(struct bwfm_softc *);
-int bwfm_detach(struct bwfm_softc *, int);
+/* Called from various bus attachment parts. */
+int bwfm_attach(device_t);
+int bwfm_detach(device_t);
+
+/* OpenBSD stuff.. */
 int bwfm_chip_attach(struct bwfm_softc *);
 int bwfm_chip_set_active(struct bwfm_softc *, uint32_t);
 void bwfm_chip_set_passive(struct bwfm_softc *);
