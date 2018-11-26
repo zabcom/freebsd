@@ -18,21 +18,34 @@
  * are located to set and get variables to and from the firmware.
  */
 
-#include <linux/kernel.h>
-#include <linux/netdevice.h>
-#include <brcmu_utils.h>
-#include <brcmu_wifi.h>
-#include "core.h"
-#include "bus.h"
-#include "debug.h"
-#include "tracepoint.h"
-#include "fwil.h"
-#include "proto.h"
+#include <sys/param.h>
+#include <sys/types.h>
+#include <sys/kernel.h>
+#include <sys/queue.h>
+#include <sys/lock.h>
+#include <sys/mutex.h>
+#include <sys/mbuf.h>
+#include <sys/callout.h>
+#include <sys/endian.h>
+#include <sys/bus.h>
+#include <sys/socket.h>
 
+#include <net/if.h>
+#include <net/if_dl.h>
+#include <net/if_media.h>
+#include <net/if_var.h>
+
+#include <netinet/in.h>
+#include <netinet/if_ether.h>
+
+#include <net80211/ieee80211_var.h>
+
+#include <dev/brcmfmac/bwfmvar.h>
+#include <dev/brcmfmac/core.h>
+#include <dev/brcmfmac/fwil.h>
 
 #define MAX_HEX_DUMP_LEN	64
 
-#ifdef DEBUG
 static const char * const brcmf_fil_errstr[] = {
 	"BCME_OK",
 	"BCME_ERROR",
@@ -89,20 +102,70 @@ static const char * const brcmf_fil_errstr[] = {
 	"BCME_IE_NOTFOUND",
 };
 
-static const char *brcmf_fil_get_errstr(u32 err)
+static const char *
+brcmf_fil_get_errstr(uint32_t err)
 {
-	if (err >= ARRAY_SIZE(brcmf_fil_errstr))
+
+	if (err >= nitems(brcmf_fil_errstr))
 		return "(unknown)";
 
-	return brcmf_fil_errstr[err];
+	return (brcmf_fil_errstr[err]);
 }
-#else
-static const char *brcmf_fil_get_errstr(u32 err)
-{
-	return "";
-}
-#endif /* DEBUG */
 
+static int
+brcmf_fil_cmd_data(struct brcmf_softc *sc, uint32_t cmd, void *data,
+    uint32_t len, bool set)
+{
+	int error, fwerr;
+
+	if (sc->sc_proto_ops == NULL) {
+		device_printf(sc->sc_dev, "%s: Error: no bus attachments\n",
+		    __func__);
+		return (ENXIO);
+	}
+
+	if (data != NULL)
+		len = MIN(len, BRCMF_DCMD_MAXLEN);
+	/* XXX-BZ FIXME: fwerr, check set/query */
+	fwerr = 0;
+	if (set)
+		error = sc->sc_proto_ops->proto_set_dcmd(sc, 0, cmd, data,
+		    (size_t)len);
+	else
+		error = sc->sc_proto_ops->proto_query_dcmd(sc, 0, cmd, data,
+		    (size_t *)&len);
+
+	if (error != 0) {
+		device_printf(sc->sc_dev, "%s: Command %#x error: %d\n",
+		    __func__, cmd, error);
+	} else if (fwerr < 0) {
+		fwerr = -fwerr;
+		device_printf(sc->sc_dev, "%s: Command %#x firmware error: "
+		    "%d (%s)\n", __func__, cmd, fwerr,
+		    brcmf_fil_get_errstr(fwerr));
+		error = EIO;
+	}
+	if (sc->sc_fwil_fwerr)
+		return (fwerr);
+
+	return (error);
+}
+
+int
+brcmf_fil_cmd_int_get(struct brcmf_softc *sc, uint32_t cmd, uint32_t *data)
+{
+	int rc;
+	uint32_t data_le;
+
+	data_le = htole32(*data);
+	/* XXX-BZ FIXME */
+	rc = brcmf_fil_cmd_data(sc, cmd, &data_le, sizeof(data_le), false);
+	*data = le32toh(data_le);
+
+	return (rc);
+}
+
+#if 0
 static s32
 brcmf_fil_cmd_data(struct brcmf_if *ifp, u32 cmd, void *data, u32 len, bool set)
 {
@@ -425,3 +488,4 @@ brcmf_fil_bsscfg_int_get(struct brcmf_if *ifp, char *name, u32 *data)
 		*data = le32_to_cpu(data_le);
 	return err;
 }
+#endif

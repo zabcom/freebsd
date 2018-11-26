@@ -62,9 +62,9 @@
 #include <dev/ic/bwfmvar.h>
 #include <dev/ic/bwfmreg.h>
 #elif defined(__FreeBSD__)
-#include <dev/bwfm/bwfmvar.h>
-#include <dev/bwfm/fwil.h>
-#include <dev/bwfm/bwfmreg.h>
+#include <dev/brcmfmac/bwfmvar.h>
+#include <dev/brcmfmac/fwil.h>
+#include <dev/brcmfmac/bwfmreg.h>
 #endif
 
 struct ieee80211_nodereq;

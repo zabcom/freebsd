@@ -147,6 +147,7 @@ struct bwfm_proto_bcdc_ctl {
 	TAILQ_ENTRY(bwfm_proto_bcdc_ctl) next;
 };
 
+#define	brcmf_softc	bwfm_softc
 struct bwfm_softc {
 	device_t		sc_dev;
 	struct ieee80211com	sc_ic;
@@ -159,6 +160,7 @@ struct bwfm_softc {
 	struct intr_config_hook	sc_preinit_hook;
 	struct callout		sc_watchdog;
 	struct task		sc_task;
+	bool			sc_fwil_fwerr;
 	uint8_t			sc_d11inf_io_type;
 #define	BRCMU_D11N_IOTYPE		1
 #define	BRCMU_D11AC_IOTYPE		2

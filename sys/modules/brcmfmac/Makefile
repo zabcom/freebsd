@@ -1,8 +1,8 @@
 # $FreeBSD$
 
-.PATH: ${SRCTOP}/sys/dev/bwfm
+.PATH: ${SRCTOP}/sys/dev/brcmfmac
 
-KMOD=	if_bwwfm
+KMOD=	if_brcmfmac
 SRCS=	bwfm.c bwfmvar.h
 SRCS+=	fwil.c fwil.h
 SRCS+=	bwfmreg.h
