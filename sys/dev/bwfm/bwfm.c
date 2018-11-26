@@ -63,6 +63,7 @@
 #include <dev/ic/bwfmreg.h>
 #elif defined(__FreeBSD__)
 #include <dev/bwfm/bwfmvar.h>
+#include <dev/bwfm/fwil.h>
 #include <dev/bwfm/bwfmreg.h>
 #endif
 
@@ -402,12 +403,16 @@ bwfm_preinit(void *arg)
 	BWFM_LOCK(sc);
 	dev = sc->sc_dev;
 
-	error = bwfm_fwvar_cmd_get_int(sc, BWFM_C_GET_VERSION, &tmp);
+	/* Get the dot11mac (D11) IO type. */
+	error = brcmf_fil_cmd_int_get(sc, BRCMF_C_GET_VERSION, &tmp);
 	if (error != 0) {
 		device_printf(dev, "%s: could not read version\n", __func__);
 		goto fail_locked;
 	}
-	sc->sc_io_type = tmp;
+	sc->sc_d11inf_io_type = tmp;
+	KASSERT((sc->sc_d11inf_io_type == BRCMU_D11N_IOTYPE ||
+	    sc->sc_d11inf_io_type == BRCMU_D11AC_IOTYPE), ("%s: unsupported "
+	    "D11 IO type %#x\n", __func__, sc->sc_d11inf_io_type));
 
 	ic = &sc->sc_ic;
 	error = bwfm_fwvar_var_get_data(sc, "cur_etheraddr", ic->ic_macaddr,
@@ -1833,7 +1838,8 @@ bwfm_fwvar_var_set_int(struct bwfm_softc *sc, char *name, uint32_t data)
 uint32_t
 bwfm_chan2spec(struct bwfm_softc *sc, struct ieee80211_channel *c)
 {
-	if (sc->sc_io_type == BWFM_IO_TYPE_D11N)
+
+	if (sc->sc_d11inf_io_type == BRCMU_D11N_IOTYPE)
 		return bwfm_chan2spec_d11n(sc, c);
 	else
 		return bwfm_chan2spec_d11ac(sc, c);
@@ -1874,7 +1880,7 @@ bwfm_chan2spec_d11ac(struct bwfm_softc *sc, struct ieee80211_channel *c)
 uint32_t
 bwfm_spec2chan(struct bwfm_softc *sc, uint32_t chanspec)
 {
-	if (sc->sc_io_type == BWFM_IO_TYPE_D11N)
+	if (sc->sc_d11inf_io_type == BRCMU_D11N_IOTYPE)
 		return bwfm_spec2chan_d11n(sc, chanspec);
 	else
 		return bwfm_spec2chan_d11ac(sc, chanspec);

@@ -148,36 +148,35 @@ struct bwfm_proto_bcdc_ctl {
 };
 
 struct bwfm_softc {
-	device_t		 sc_dev;
-	struct mtx		 sc_mtx;
-	struct mbufq		 sc_snd;
-	int			 qfullmsk;
-	uint32_t		 sc_state;
+	device_t		sc_dev;
+	struct ieee80211com	sc_ic;
+	struct mtx		sc_mtx;
+	struct mbufq		sc_snd;
+	int			qfullmsk;
+	uint32_t		sc_state;
 #define	BWFM_STATE_ATTACHED		0x00000001
 #define	BWFM_STATE_INITALIZED		0x00000002
 	struct intr_config_hook	sc_preinit_hook;
 	struct callout		sc_watchdog;
+	struct task		sc_task;
+	uint8_t			sc_d11inf_io_type;
+#define	BRCMU_D11N_IOTYPE		1
+#define	BRCMU_D11AC_IOTYPE		2
 
 
 
-	struct ieee80211com	 sc_ic;
 	struct ifmedia		 sc_media;
 	struct bwfm_bus_ops	*sc_bus_ops;
 	struct bwfm_buscore_ops	*sc_buscore_ops;
 	struct bwfm_proto_ops	*sc_proto_ops;
 	struct bwfm_chip	 sc_chip;
-	uint8_t			 sc_io_type;
-#define		BWFM_IO_TYPE_D11N		1
-#define		BWFM_IO_TYPE_D11AC		2
 
-	int			 sc_initialized;
 	int			 sc_tx_timer;
 
 	int			 (*sc_newstate)(struct ieee80211com *,
 				     enum ieee80211_state, int);
 	struct bwfm_host_cmd_ring sc_cmdq;
 	struct taskq		*sc_taskq;
-	struct task		 sc_task;
 
 	int			 sc_bcdc_reqid;
 	TAILQ_HEAD(, bwfm_proto_bcdc_ctl) sc_bcdc_rxctlq;
