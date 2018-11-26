@@ -87,6 +87,7 @@
 #define BRCMF_C_SET_VAR				263
 #define BRCMF_C_SET_WSEC_PMK			268
 
+#if !defined(__FreeBSD__)
 s32 brcmf_fil_cmd_data_set(struct brcmf_if *ifp, u32 cmd, void *data, u32 len);
 s32 brcmf_fil_cmd_data_get(struct brcmf_if *ifp, u32 cmd, void *data, u32 len);
 s32 brcmf_fil_cmd_int_set(struct brcmf_if *ifp, u32 cmd, u32 data);
@@ -105,5 +106,6 @@ s32 brcmf_fil_bsscfg_data_get(struct brcmf_if *ifp, char *name, void *data,
 			      u32 len);
 s32 brcmf_fil_bsscfg_int_set(struct brcmf_if *ifp, char *name, u32 data);
 s32 brcmf_fil_bsscfg_int_get(struct brcmf_if *ifp, char *name, u32 *data);
+#endif
 
 #endif /* _fwil_h_ */
