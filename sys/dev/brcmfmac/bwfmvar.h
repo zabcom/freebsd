@@ -16,6 +16,9 @@
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 
+#ifndef _BRCMFMAC_VAR_H
+#define _BRCMFMAC_VAR_H
+
 /* Chipcommon Core Chip IDs */
 #define BRCM_CC_43143_CHIP_ID		43143
 #define BRCM_CC_43235_CHIP_ID		43235
@@ -54,6 +57,12 @@
 #define BWFM_DEFAULT_SCAN_UNASSOC_TIME	40
 #define BWFM_DEFAULT_SCAN_PASSIVE_TIME	120
 
+#define	BWFM_LOCK_INIT(_sc)	mtx_init(&(_sc)->sc_mtx, \
+    device_get_nameunit((_sc)->sc_dev), MTX_NETWORK_LOCK, MTX_DEF);
+#define	BWFM_LOCK(_sc)		mtx_lock(&(_sc)->sc_mtx)
+#define	BWFM_UNLOCK(_sc)	mtx_unlock(&(_sc)->sc_mtx)
+#define	BWFM_LOCK_ASSERT(_sc)	mtx_assert(&(_sc)->sc_mtx, MA_OWNED)
+#define	BWFM_LOCK_DESTROY(_sc)	mtx_destroy(&(_sc)->sc_mtx)
 
 struct bwfm_softc;
 
@@ -103,9 +112,9 @@ struct bwfm_buscore_ops {
 
 struct bwfm_proto_ops {
 	int (*proto_query_dcmd)(struct bwfm_softc *, int, int,
-	    char *, size_t *);
+	    char *, uint32_t *, int *);
 	int (*proto_set_dcmd)(struct bwfm_softc *, int, int,
-	    char *, size_t);
+	    char *, uint32_t, int *);
 	void (*proto_rx)(struct bwfm_softc *, struct mbuf *);
 	void (*proto_rxctl)(struct bwfm_softc *, char *, size_t);
 };
@@ -164,8 +173,7 @@ struct bwfm_softc {
 	uint8_t			sc_d11inf_io_type;
 #define	BRCMU_D11N_IOTYPE		1
 #define	BRCMU_D11AC_IOTYPE		2
-
-
+	unsigned char		sc_proto_buf[BRCMF_DCMD_MAXLEN];
 
 	struct ifmedia		 sc_media;
 	struct bwfm_bus_ops	*sc_bus_ops;
@@ -198,3 +206,5 @@ struct bwfm_core *bwfm_chip_get_pmu(struct bwfm_softc *);
 void bwfm_rx(struct bwfm_softc *, struct mbuf *);
 void bwfm_do_async(struct bwfm_softc *, void (*)(struct bwfm_softc *, void *),
     void *, int);
+
+#endif /* _BRCMFMAC_VAR_H */

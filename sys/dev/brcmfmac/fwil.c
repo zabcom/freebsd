@@ -40,9 +40,12 @@
 
 #include <net80211/ieee80211_var.h>
 
-#include <dev/brcmfmac/bwfmvar.h>
 #include <dev/brcmfmac/core.h>
+#include <dev/brcmfmac/bwfmvar.h>
 #include <dev/brcmfmac/fwil.h>
+
+#define	brcmf_dbg(_type, ...)
+#define	brcmf_dbg_hex_dump(...)
 
 #define MAX_HEX_DUMP_LEN	64
 
@@ -114,55 +117,108 @@ brcmf_fil_get_errstr(uint32_t err)
 
 static int
 brcmf_fil_cmd_data(struct brcmf_softc *sc, uint32_t cmd, void *data,
-    uint32_t len, bool set)
+    uint32_t *len, bool set)
 {
-	int error, fwerr;
+	struct bwfm_proto_ops *pops;
+	int err, fwerr;
+
+	BWFM_LOCK_ASSERT(sc);
 
 	if (sc->sc_proto_ops == NULL) {
 		device_printf(sc->sc_dev, "%s: Error: no bus attachments\n",
 		    __func__);
 		return (ENXIO);
 	}
+	pops = sc->sc_proto_ops;
 
 	if (data != NULL)
-		len = MIN(len, BRCMF_DCMD_MAXLEN);
-	/* XXX-BZ FIXME: fwerr, check set/query */
-	fwerr = 0;
+		*len = MIN(*len, BRCMF_DCMD_MAXLEN);
 	if (set)
-		error = sc->sc_proto_ops->proto_set_dcmd(sc, 0, cmd, data,
-		    (size_t)len);
+		err = pops->proto_set_dcmd(sc, 0, cmd, data, *len, &fwerr);
 	else
-		error = sc->sc_proto_ops->proto_query_dcmd(sc, 0, cmd, data,
-		    (size_t *)&len);
+		err = pops->proto_query_dcmd(sc, 0, cmd, data, len, &fwerr);
 
-	if (error != 0) {
+	if (err != 0) {
 		device_printf(sc->sc_dev, "%s: Command %#x error: %d\n",
-		    __func__, cmd, error);
+		    __func__, cmd, err);
 	} else if (fwerr < 0) {
 		fwerr = -fwerr;
 		device_printf(sc->sc_dev, "%s: Command %#x firmware error: "
 		    "%d (%s)\n", __func__, cmd, fwerr,
 		    brcmf_fil_get_errstr(fwerr));
-		error = EIO;
+		err = EIO;
 	}
 	if (sc->sc_fwil_fwerr)
 		return (fwerr);
 
-	return (error);
+	return (err);
 }
 
 int
 brcmf_fil_cmd_int_get(struct brcmf_softc *sc, uint32_t cmd, uint32_t *data)
 {
 	int rc;
-	uint32_t data_le;
+	uint32_t data_le, len;
+
+	BWFM_LOCK_ASSERT(sc);
 
 	data_le = htole32(*data);
-	/* XXX-BZ FIXME */
-	rc = brcmf_fil_cmd_data(sc, cmd, &data_le, sizeof(data_le), false);
+	len = sizeof(data_le);
+	rc = brcmf_fil_cmd_data(sc, cmd, &data_le, &len, false);
 	*data = le32toh(data_le);
 
 	return (rc);
+}
+
+static uint32_t
+brcmf_create_iovar(struct brcmf_softc *sc, char *name, const char *data,
+    uint32_t datalen, char *buf, uint32_t buflen)
+{
+	uint32_t len;
+
+	len = strlen(name) + 1;
+
+	if ((len + datalen) > buflen) {
+		device_printf(sc->sc_dev, "%s: %s: len %u + datalen %u > "
+		    "buflen %u\n", __func__, name, len, datalen, buflen);
+		return (0);
+	}
+
+	memcpy(buf, name, len);
+	/* Append data onto the end of the name string. */
+	if (data && datalen)
+		memcpy(&buf[len], data, datalen);
+
+	return (len + datalen);
+}
+
+
+int
+brcmf_fil_iovar_data_get(struct brcmf_softc *sc, char *name, void *data,
+    uint32_t len)
+{
+	uint32_t buflen;
+	int err;
+
+	BWFM_LOCK_ASSERT(sc);
+
+	buflen = brcmf_create_iovar(sc, name, data, len, sc->sc_proto_buf,
+	    sizeof(sc->sc_proto_buf));
+	if (buflen == 0) {
+		err = EMSGSIZE;
+		goto out;
+	}
+	err = brcmf_fil_cmd_data(sc, BRCMF_C_GET_VAR, sc->sc_proto_buf, &buflen,
+	    false);
+	if (err == 0)
+		memcpy(data, sc->sc_proto_buf, len);
+
+	brcmf_dbg(FIL, "ifidx=%d, name=%s, len=%d\n", ifp->ifidx, name, len);
+	brcmf_dbg_hex_dump(BRCMF_FIL_ON(), data,
+			   min_t(uint, len, MAX_HEX_DUMP_LEN), "data\n");
+out:
+
+	return (err);
 }
 
 #if 0

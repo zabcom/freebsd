@@ -58,14 +58,10 @@
 
 #include <net80211/ieee80211_var.h>
 
-#if defined(__OpenBSD__)
-#include <dev/ic/bwfmvar.h>
-#include <dev/ic/bwfmreg.h>
-#elif defined(__FreeBSD__)
+#include <dev/brcmfmac/core.h>
 #include <dev/brcmfmac/bwfmvar.h>
 #include <dev/brcmfmac/fwil.h>
 #include <dev/brcmfmac/bwfmreg.h>
-#endif
 
 struct ieee80211_nodereq;
 #define	IFF_RUNNING		IFF_DRV_RUNNING
@@ -76,13 +72,6 @@ struct ieee80211_nodereq;
 #define	delay(_x)		DELAY((_x))
 #define	M_DONTWAIT		M_NOWAIT
 #define	splsoftnet(_x)		0
-
-#define	BWFM_LOCK_INIT(_sc)	mtx_init(&(_sc)->sc_mtx, \
-    device_get_nameunit((_sc)->sc_dev), MTX_NETWORK_LOCK, MTX_DEF);
-#define	BWFM_LOCK(_sc)		mtx_lock(&(_sc)->sc_mtx)
-#define	BWFM_UNLOCK(_sc)	mtx_unlock(&(_sc)->sc_mtx)
-#define	BWFM_LOCK_ASSERT(_sc)	mtx_assert(&(_sc)->sc_mtx, MA_OWNED)
-#define	BWFM_LOCK_DESTROY(_sc)	mtx_destroy(&(_sc)->sc_mtx)
 
 /* #define BWFM_DEBUG */
 #ifdef BWFM_DEBUG
@@ -133,9 +122,9 @@ void	 bwfm_chip_tcm_ramsize(struct bwfm_softc *, struct bwfm_core *);
 void	 bwfm_chip_tcm_rambase(struct bwfm_softc *);
 
 int	 bwfm_proto_bcdc_query_dcmd(struct bwfm_softc *, int,
-	     int, char *, size_t *);
+	     int, char *, uint32_t *, int *);
 int	 bwfm_proto_bcdc_set_dcmd(struct bwfm_softc *, int,
-	     int, char *, size_t);
+	     int, char *, uint32_t, int *);
 void	 bwfm_proto_bcdc_rx(struct bwfm_softc *, struct mbuf *);
 int	 bwfm_proto_bcdc_txctl(struct bwfm_softc *, int, char *, size_t *);
 void	 bwfm_proto_bcdc_rxctl(struct bwfm_softc *, char *, size_t);
@@ -415,7 +404,7 @@ bwfm_preinit(void *arg)
 	    "D11 IO type %#x\n", __func__, sc->sc_d11inf_io_type));
 
 	ic = &sc->sc_ic;
-	error = bwfm_fwvar_var_get_data(sc, "cur_etheraddr", ic->ic_macaddr,
+	error = brcmf_fil_iovar_data_get(sc, "cur_etheraddr", ic->ic_macaddr,
 	    sizeof(ic->ic_macaddr));
 	if (error != 0) {
 		device_printf(dev, "%s: could not read mac address\n",
@@ -1562,11 +1551,14 @@ bwfm_chip_tcm_rambase(struct bwfm_softc *sc)
 /* BCDC protocol implementation */
 int
 bwfm_proto_bcdc_query_dcmd(struct bwfm_softc *sc, int ifidx,
-    int cmd, char *buf, size_t *len)
+    int cmd, char *buf, uint32_t *len, int *fwerr)
 {
 	struct bwfm_proto_bcdc_dcmd *dcmd;
 	size_t size = sizeof(dcmd->hdr) + *len;
 	int ret = 1, reqid;
+
+	if (fwerr != NULL)
+		*fwerr = 0;
 
 	reqid = sc->sc_bcdc_reqid++;
 
@@ -1606,11 +1598,14 @@ bwfm_proto_bcdc_query_dcmd(struct bwfm_softc *sc, int ifidx,
 
 int
 bwfm_proto_bcdc_set_dcmd(struct bwfm_softc *sc, int ifidx,
-    int cmd, char *buf, size_t len)
+    int cmd, char *buf, uint32_t len, int *fwerr)
 {
 	struct bwfm_proto_bcdc_dcmd *dcmd;
 	size_t size = sizeof(dcmd->hdr) + len;
 	int ret = 1, reqid;
+
+	if (fwerr != NULL)
+		*fwerr = 0;
 
 	reqid = sc->sc_bcdc_reqid++;
 
@@ -1754,13 +1749,13 @@ bwfm_proto_bcdc_rx(struct bwfm_softc *sc, struct mbuf *m)
 int
 bwfm_fwvar_cmd_get_data(struct bwfm_softc *sc, int cmd, void *data, size_t len)
 {
-	return sc->sc_proto_ops->proto_query_dcmd(sc, 0, cmd, data, &len);
+	return sc->sc_proto_ops->proto_query_dcmd(sc, 0, cmd, data, (uint32_t *)&len, NULL);
 }
 
 int
 bwfm_fwvar_cmd_set_data(struct bwfm_softc *sc, int cmd, void *data, size_t len)
 {
-	return sc->sc_proto_ops->proto_set_dcmd(sc, 0, cmd, data, len);
+	return sc->sc_proto_ops->proto_set_dcmd(sc, 0, cmd, data, (uint32_t)len, NULL);
 }
 
 int
