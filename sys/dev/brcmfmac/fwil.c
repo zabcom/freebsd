@@ -157,17 +157,17 @@ brcmf_fil_cmd_data(struct brcmf_softc *sc, uint32_t cmd, void *data,
 int
 brcmf_fil_cmd_int_get(struct brcmf_softc *sc, uint32_t cmd, uint32_t *data)
 {
-	int rc;
+	int err;
 	uint32_t data_le, len;
 
 	BWFM_LOCK_ASSERT(sc);
 
 	data_le = htole32(*data);
 	len = sizeof(data_le);
-	rc = brcmf_fil_cmd_data(sc, cmd, &data_le, &len, false);
+	err = brcmf_fil_cmd_data(sc, cmd, &data_le, &len, false);
 	*data = le32toh(data_le);
 
-	return (rc);
+	return (err);
 }
 
 static uint32_t
@@ -220,6 +220,23 @@ out:
 
 	return (err);
 }
+
+int
+brcmf_fil_iovar_int_get(struct brcmf_softc *sc, char *name, uint32_t *data)
+{
+	uint32_t data_le;
+	int err;
+
+	BWFM_LOCK_ASSERT(sc);
+
+	data_le = htole32(*data);
+	err = brcmf_fil_iovar_data_get(sc, name, &data_le, sizeof(data_le));
+	if (err == 0)
+		*data = le32toh(data_le);
+	return (err);
+}
+
+/* ************************************************************************** */
 
 #if 0
 static s32

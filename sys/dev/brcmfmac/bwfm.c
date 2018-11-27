@@ -135,7 +135,6 @@ int	 bwfm_fwvar_cmd_get_int(struct bwfm_softc *, int, uint32_t *);
 int	 bwfm_fwvar_cmd_set_int(struct bwfm_softc *, int, uint32_t);
 int	 bwfm_fwvar_var_get_data(struct bwfm_softc *, char *, void *, size_t);
 int	 bwfm_fwvar_var_set_data(struct bwfm_softc *, char *, void *, size_t);
-int	 bwfm_fwvar_var_get_int(struct bwfm_softc *, char *, uint32_t *);
 int	 bwfm_fwvar_var_set_int(struct bwfm_softc *, char *, uint32_t);
 
 uint32_t bwfm_chan2spec(struct bwfm_softc *, struct ieee80211_channel *);
@@ -302,9 +301,9 @@ bwfm_init_bands(struct bwfm_softc *sc)
 	ic = &sc->sc_ic;
 
 	/* If we get an error back simply disable the feature. */
-	if (bwfm_fwvar_var_get_int(sc, "nmode", &nmode))
+	if (brcmf_fil_iovar_int_get(sc, "nmode", &nmode))
 		nmode = 0;
-	if (bwfm_fwvar_var_get_int(sc, "vhtmode", &vhtmode))
+	if (brcmf_fil_iovar_int_get(sc, "vhtmode", &vhtmode))
 		vhtmode = 0;
 
 	error = bwfm_fwvar_cmd_get_data(sc, BWFM_C_GET_BANDLIST, bandlist,
@@ -1814,15 +1813,6 @@ bwfm_fwvar_var_set_data(struct bwfm_softc *sc, char *name, void *data, size_t le
 }
 
 int
-bwfm_fwvar_var_get_int(struct bwfm_softc *sc, char *name, uint32_t *data)
-{
-	int ret;
-	ret = bwfm_fwvar_var_get_data(sc, name, data, sizeof(*data));
-	*data = letoh32(*data);
-	return ret;
-}
-
-int
 bwfm_fwvar_var_set_int(struct bwfm_softc *sc, char *name, uint32_t data)
 {
 	data = htole32(data);
@@ -2782,7 +2772,7 @@ bwfm_set_key_cb(struct bwfm_softc *sc, void *arg)
 	}
 
 	bwfm_fwvar_var_set_data(sc, "wsec_key", &key, sizeof(key));
-	bwfm_fwvar_var_get_int(sc, "wsec", &wsec);
+	brcmf_fil_iovar_int_get(sc, "wsec", &wsec);
 	wsec |= wsec_enable;
 	bwfm_fwvar_var_set_int(sc, "wsec", wsec);
 #endif
