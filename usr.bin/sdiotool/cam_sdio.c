@@ -429,15 +429,15 @@ sdio_func_read_cis(struct cam_device *dev, uint8_t func_number,
 			/* TPLFE_TYPE (Extended Data) */
 			v  = sdio_read_1(dev, 0, addr++, &ret);
 			if (func_number == 0) {
-				/* Assert that v == 0. */
-				info->max_block_size  = sdio_read_1(dev, 0, addr++, &ret);
-				info->max_block_size |= sdio_read_1(dev, 0, addr, &ret) << 8
+				if (v != 0x00)
+					break;
 			} else {
 				if (v != 0x01)
 					break;
-				info->max_block_size  = sdio_read_1(dev, 0, addr + 0xC, &ret);
-				info->max_block_size |= sdio_read_1(dev, 0, addr + 0xD, &ret) << 8;
+				addr += 0x0b;
 			}
+			info->max_block_size  = sdio_read_1(dev, 0, addr++, &ret);
+			info->max_block_size |= sdio_read_1(dev, 0, addr, &ret) << 8
 			break;
 		default:
 			warnx("Skipping func_number %d tuple %d ID %#02x len %#02x",

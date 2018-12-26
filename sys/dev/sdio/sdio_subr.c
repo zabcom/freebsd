@@ -135,7 +135,7 @@ sdio_func_read_cis(union ccb *ccb, uint8_t func_number, uint32_t cis_addr,
 	char *cis1_info[4];
 	int start, i, ch, count, ret;
 	uint32_t addr;
-	uint8_t tuple_id, tuple_len, tuple_count;
+	uint8_t tuple_id, tuple_len, tuple_count, v;
 
 	/* Use to prevent infinite loop in case of parse errors. */
 	tuple_count = 0;
@@ -150,7 +150,7 @@ sdio_func_read_cis(union ccb *ccb, uint8_t func_number, uint32_t cis_addr,
 			continue;
 		}
 		tuple_len = sdio_read_1(ccb, 0, addr++, &ret);
-		if (tuple_len == 0 && tuple_id != 0x00) {
+		if (tuple_len == 0) {
 			warnx("%s: parse error: 0-length tuple %#02x\n",
 			    __func__, tuple_id);
 			return (-1);
@@ -198,21 +198,33 @@ sdio_func_read_cis(union ccb *ccb, uint8_t func_number, uint32_t cis_addr,
 				    __func__, tuple_len);
 				break;
 			}
-			if (func_number == 0)
-				/* Skip extended_data. */
-				addr++;
-			else
-				addr += 0xc;
+			/* TPLFE_TYPE (Extended Data) */
+			v = sdio_read_1(dev, 0, addr++, &ret);
+			if (func_number == 0) {
+				if (v != 0x00)
+					break;
+			} else {
+				if (v != 0x01)
+					break;
+				addr += 0x0b;
+			}
 			/* XXX-BZ error checking? */
 			info->max_block_size = sdio_read_1(ccb, 0, addr, &ret);
 			info->max_block_size |=
 			    sdio_read_1(ccb, 0, addr+1, &ret) << 8;
+
 			break;
 		default:
-			warnx("%s: skipping tuple ID %#02x len %#02x\n",
-			    __func__, tuple_id, tuple_len);
+			warnx("%s: func_number %d tuple %d ID %#02x len %#02x\n",
+			    __func__, func_number, tuple_count, tuple_id,
+			    tuple_len);
 		}
-		cis_addr += tuple_len + 2;
+		if (tuple_len = 0xff) {
+			/* Also marks the end of a tuple chain (E1 16.2) */
+			/* The tuple is valid, hence this going at the end. */
+			break;
+		}
+		cis_addr += 2 + tuple_len;
 		tuple_count++;
 	} while (tuple_count < 20);
 
