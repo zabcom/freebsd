@@ -1,5 +1,9 @@
 /*-
  * Copyright (c) 2017 Ilya Bakulin.  All rights reserved.
+ * Copyright (c) 2018 The FreeBSD Foundation
+ *
+ * Portions of this software were developed by Björn Zeeb
+ * under sponsorship from the FreeBSD Foundation.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
