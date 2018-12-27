@@ -155,6 +155,8 @@ sdioinit(void)
 	/*
 	 * Install a global async callback.  This callback will
 	 * receive async callbacks like "new device found".
+	 * While registering, we will be notified of all already existing
+	 * devices.
 	 */
 	status = xpt_register_async(AC_FOUND_DEVICE, sdioasync, NULL, NULL);
 	if (status != CAM_REQ_CMP)
