@@ -312,7 +312,7 @@ get_sdio_card_info(union ccb *ccb, struct card_info *ci)
 	mmcp = &ccb->ccb_h.path->device->mmc_ident_data;
 	func_count = MIN(mmcp->sdio_func_count, nitems(ci->f));
 	for (i = 1; i < func_count; i++) {
-		fbr_addr = SD_IO_FBR_START * i + SD_IO_FBD_CIS_OFFSET;
+		fbr_addr = SD_IO_FBR_START * i + SD_IO_FBR_CIS_OFFSET;
 		cis_addr  = sdio_read_1(ccb, 0, fbr_addr++, &ret);
 		if (ret != 0)
 			break;
