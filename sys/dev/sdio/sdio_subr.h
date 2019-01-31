@@ -48,11 +48,12 @@ struct cis_info {
 	uint16_t man_id;
 	uint16_t prod_id;
 	uint16_t max_block_size;
+	uint16_t _pad;
 };
 
 struct card_info {
-	uint8_t num_funcs;
 	struct cis_info f[8];
+	uint8_t num_funcs;
 };
 
 #ifdef _KERNEL
