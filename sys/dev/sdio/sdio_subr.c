@@ -86,7 +86,7 @@ sdioerror(union ccb *ccb, u_int32_t cam_flags, u_int32_t sense_flags)
 /* CMD52: direct byte access */
 int
 sdio_rw_direct(union ccb *ccb, uint8_t func_number, uint32_t addr,
-    uint8_t is_write, uint8_t *data, uint8_t *resp)
+    bool is_write, uint8_t *data, uint8_t *resp)
 {
 	struct ccb_mmcio *mmcio;
 	uint32_t flags;
@@ -113,11 +113,15 @@ sdio_rw_direct(union ccb *ccb, uint8_t func_number, uint32_t addr,
 		       /*mmc_data*/ 0,
 		       /*timeout*/ 5000);
 	retval = cam_periph_runccb(ccb, sdioerror, CAM_FLAG_NONE, 0, NULL);
-	if (retval != 0)
+	if (retval != 0) {
+		warnx("%s: Failed to %s address: %#10x\n", __func__,
+		    (is_write) ? "write" : "read", addr);
 		return (retval);
+	}
 
 	/* TODO: Add handling of MMC errors */
 	*resp = ccb->mmcio.cmd.resp[0] & 0xff;
+
 	return (0);
 }
 
@@ -127,7 +131,7 @@ sdio_read_1(union ccb *ccb, uint8_t func_number, uint32_t addr, int *ret)
 	uint8_t val;
 
 	KASSERT((ret != NULL), ("%s ret passed as NULL\n", __func__));
-	*ret = sdio_rw_direct(ccb, func_number, addr, 0, NULL, &val);
+	*ret = sdio_rw_direct(ccb, func_number, addr, false, NULL, &val);
 	return val;
 }
 
@@ -141,12 +145,20 @@ sdio_func_read_cis(union ccb *ccb, uint8_t func_number, uint32_t cis_addr,
 	uint32_t addr;
 	uint8_t tuple_id, tuple_len, tuple_count, v;
 
+	KASSERT((info != NULL), ("%s info passed as NULL\n", __func__));
+
+	/* If we encounter any read errors, abort and return. */
+#define	ERR_OUT(ret)							\
+	if (ret != 0)							\
+		goto err;
+	ret = 0;
 	/* Use to prevent infinite loop in case of parse errors. */
 	tuple_count = 0;
 	memset(cis1_info_buf, 0, 256);
 	do {
 		addr = cis_addr;
 		tuple_id = sdio_read_1(ccb, 0, addr++, &ret);
+		ERR_OUT(ret);
 		if (tuple_id == SD_IO_CISTPL_END)
 			break;
 		if (tuple_id == 0) {
@@ -154,10 +166,11 @@ sdio_func_read_cis(union ccb *ccb, uint8_t func_number, uint32_t cis_addr,
 			continue;
 		}
 		tuple_len = sdio_read_1(ccb, 0, addr++, &ret);
+		ERR_OUT(ret);
 		if (tuple_len == 0) {
 			warnx("%s: parse error: 0-length tuple %#02x\n",
 			    __func__, tuple_id);
-			return (-1);
+			return (EIO);
 		}
 
 		switch (tuple_id) {
@@ -166,6 +179,7 @@ sdio_func_read_cis(union ccb *ccb, uint8_t func_number, uint32_t cis_addr,
 			for (count = 0, start = 0, i = 0;
 			     (count < 4) && ((i + 4) < 256); i++) {
 				ch = sdio_read_1(ccb, 0, addr + i, &ret);
+				ERR_OUT(ret);
 				DPRINTF("%s: count=%d, start=%d, i=%d, got "
 				    "(%#02x)\n", __func_, count, start, i, ch);
 				if (ch == 0xff)
@@ -179,19 +193,21 @@ sdio_func_read_cis(union ccb *ccb, uint8_t func_number, uint32_t cis_addr,
 				}
 			}
 			/* XXX-BZ printfs as part of a parsing API seem odd. */
-			printf("Card info:");
+			printf("Card info: ");
 			for (i=0; i < 4; i++)
 				if (cis1_info[i])
 					printf(" %s", cis1_info[i]);
 			printf("\n");
 			break;
 		case SD_IO_CISTPL_MANFID:
-			KASSERT((info != NULL),
-			     ("%s info passed as NULL\n", __func__));
-			info->man_id =  sdio_read_1(ccb, 0, addr++, &ret);
+			info->man_id  = sdio_read_1(ccb, 0, addr++, &ret);
+			ERR_OUT(ret);
 			info->man_id |= sdio_read_1(ccb, 0, addr++, &ret) << 8;
-			info->prod_id =  sdio_read_1(ccb, 0, addr++, &ret);
+			ERR_OUT(ret);
+			info->prod_id  = sdio_read_1(ccb, 0, addr++, &ret);
+			ERR_OUT(ret);
 			info->prod_id |= sdio_read_1(ccb, 0, addr, &ret) << 8;
+			ERR_OUT(ret);
 			break;
 		case SD_IO_CISTPL_FUNCID:
 			/* not sure if we need to parse it? */
@@ -204,6 +220,7 @@ sdio_func_read_cis(union ccb *ccb, uint8_t func_number, uint32_t cis_addr,
 			}
 			/* TPLFE_TYPE (Extended Data) */
 			v = sdio_read_1(dev, 0, addr++, &ret);
+			ERR_OUT(ret);
 			if (func_number == 0) {
 				if (v != 0x00)
 					break;
@@ -212,10 +229,11 @@ sdio_func_read_cis(union ccb *ccb, uint8_t func_number, uint32_t cis_addr,
 					break;
 				addr += 0x0b;
 			}
-			/* XXX-BZ error checking? */
 			info->max_block_size = sdio_read_1(ccb, 0, addr, &ret);
+			ERR_OUT(ret);
 			info->max_block_size |=
 			    sdio_read_1(ccb, 0, addr+1, &ret) << 8;
+			ERR_OUT(ret);
 
 			break;
 		default:
@@ -231,8 +249,10 @@ sdio_func_read_cis(union ccb *ccb, uint8_t func_number, uint32_t cis_addr,
 		cis_addr += 2 + tuple_len;
 		tuple_count++;
 	} while (tuple_count < 20);
+err:
+#undef ERR_OUT
 
-	return (0);
+	return (ret);
 }
 
 uint32_t
@@ -241,14 +261,21 @@ sdio_get_common_cis_addr(union ccb *ccb)
 	uint32_t addr;
 	int ret;
 
-	/* XXX-BZ error checking on the first rather than the last, all? */
-	addr =  sdio_read_1(ccb, 0, SD_IO_CCCR_CISPTR, &ret);
-	addr |= sdio_read_1(ccb, 0, SD_IO_CCCR_CISPTR + 1, &ret) << 8;
-	addr |= sdio_read_1(ccb, 0, SD_IO_CCCR_CISPTR + 2, &ret) << 16;
-	if (ret != 0) {
-		warnx("%s: Failed to read CIS address\n", __func__);
-		return (0xff);
-	}
+#define	SR1(offset)							\
+	do {								\
+		addr |= sdio_read_1(ccb, 0, SD_IO_CCCR_CISPTR +		\
+		    (offset), &ret) << (8 * (offset));			\
+		if (ret != 0) {						\
+			warnx("%s: Failed to read CIS address: %d\n",	\
+			    __func__, offset);				\
+			return (0xff);					\
+		}							\
+	} while (0)
+	addr = 0;
+	SR1(0);
+	SR1(1);
+	SR1(2);
+#undef SR1
 
 	if (addr < SD_IO_CIS_START || addr > SD_IO_CIS_START + SD_IO_CIS_SIZE) {
 		warnx("%s: bad CIS address: %#04x\n", __func__, addr);
@@ -262,9 +289,9 @@ int
 get_sdio_card_info(union ccb *ccb, struct card_info *ci)
 {
 	struct mmc_params *mmcp;
-	uint32_t cis_addr;
-	uint32_t fbr_addr;
-	int ret;
+	uint32_t cis_addr, fbr_addr;
+	int i, ret;
+	uint8_t func_count;
 
 	cis_addr = sdio_get_common_cis_addr(ccb);
 	if (cis_addr == 0xff)
@@ -272,22 +299,32 @@ get_sdio_card_info(union ccb *ccb, struct card_info *ci)
 
 	KASSERT((ci != NULL), ("%s ci passed as NULL\n", __func__));
 	memset(ci, 0, sizeof(struct card_info));
+
+	/* F0 must always be present. */
 	ret = sdio_func_read_cis(ccb, 0, cis_addr, &ci->f[0]);
-	if (ret !=0)
+	if (ret != 0)
 		return (ret);
+	ci->num_funcs++;
 	DPRINTF("%s: F0: Vendor %#04x product %#04x max block size %d bytes\n",
 	    __func__, ci->f[0].man_id, ci->f[0].prod_id,
 	    ci->f[0].max_block_size);
 
 	mmcp = &ccb->ccb_h.path->device->mmc_ident_data;
-	for (int i = 1; i <= mmcp->sdio_func_count; i++) {
-		/* XXX-BZ magic number */
-		fbr_addr = SD_IO_FBR_START * i + 0x9;
-		/* XXX-BZ error checking */
-		cis_addr =  sdio_read_1(ccb, 0, fbr_addr++, &ret);
+	func_count = MIN(mmcp->sdio_func_count, nitems(ci->f));
+	for (i = 1; i < func_count; i++) {
+		fbr_addr = SD_IO_FBR_START * i + SD_IO_FBD_CIS_OFFSET;
+		cis_addr  = sdio_read_1(ccb, 0, fbr_addr++, &ret);
+		if (ret != 0)
+			break;
 		cis_addr |= sdio_read_1(ccb, 0, fbr_addr++, &ret) << 8;
+		if (ret != 0)
+			break;
 		cis_addr |= sdio_read_1(ccb, 0, fbr_addr++, &ret) << 16;
-		sdio_func_read_cis(ccb, i, cis_addr, &ci->f[i]);
+		if (ret != 0)
+			break;
+		ret = sdio_func_read_cis(ccb, i, cis_addr, &ci->f[i]);
+		if (ret != 0)
+			break;
 		DPRINTF("%s: F%d: Vendor %#04x product %#04x max block size "
 		    "%d bytes\n", __func__, i,
 		    ci->f[i].man_id, ci->f[i].prod_id, ci->f[i].max_block_size);
