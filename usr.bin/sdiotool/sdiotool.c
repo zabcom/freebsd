@@ -492,7 +492,7 @@ get_sdio_card_info(struct cam_device *dev, struct card_info *ci)
 	printf("F0: Vendor %#04x product %#04x max block size %d bytes\n",
 	       ci->f[0].man_id, ci->f[0].prod_id, ci->f[0].max_block_size);
 	for (int i = 1; i < func_count; i++) {
-		fbr_addr = SD_IO_FBR_START * i + SD_IO_FBD_CIS_OFFSET;
+		fbr_addr = SD_IO_FBR_START * i + SD_IO_FBR_CIS_OFFSET;
 		cis_addr =  sdio_read_1(dev, 0, fbr_addr++, &ret);
 		bailout(ret);
 		cis_addr |= sdio_read_1(dev, 0, fbr_addr++, &ret) << 8;

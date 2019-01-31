@@ -440,13 +440,13 @@ sdio_func_read_cis(struct cam_device *dev, uint8_t func_number,
 				addr += 0x0b;
 			}
 			info->max_block_size  = sdio_read_1(dev, 0, addr++, &ret);
-			info->max_block_size |= sdio_read_1(dev, 0, addr, &ret) << 8
+			info->max_block_size |= sdio_read_1(dev, 0, addr, &ret) << 8;
 			break;
 		default:
 			warnx("Skipping func_number %d tuple %d ID %#02x len %#02x",
 			    func_number, tuple_count, tuple_id, tuple_len);
 		}
-		if (tuple_len = 0xff) {
+		if (tuple_len == 0xff) {
 			/* Also marks the end of a tuple chain (E1 16.2) */
 			/* The tuple is valid, hence this going at the end. */
 			break;
