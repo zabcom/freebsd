@@ -566,6 +566,7 @@ struct mmc_request {
 /* Function Basic Registers (FBR) */
 #define	SD_IO_FBR_START			0x00100
 #define	SD_IO_FBR_SIZE			0x00700
+#define	SD_IO_FBR_CIS_OFFSET		0x9
 
 /* Card Information Structure (CIS) */
 #define	SD_IO_CIS_START			0x01000
