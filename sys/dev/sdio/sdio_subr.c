@@ -62,6 +62,8 @@ __FBSDID("$FreeBSD$");
 #include "sdio_subr.h"
 #include "opt_cam.h"
 
+/* XXX-BZ really should make that CAM_DEBUG as well */
+#define	DEBUG		/* for now while we are developing. */
 #ifdef DEBUG
 #define	DPRINTF(...)		printf(__VA_ARGS__)
 #else
@@ -181,7 +183,7 @@ sdio_func_read_cis(union ccb *ccb, uint8_t func_number, uint32_t cis_addr,
 				ch = sdio_read_1(ccb, 0, addr + i, &ret);
 				ERR_OUT(ret);
 				DPRINTF("%s: count=%d, start=%d, i=%d, got "
-				    "(%#02x)\n", __func_, count, start, i, ch);
+				    "(%#02x)\n", __func__, count, start, i, ch);
 				if (ch == 0xff)
 					break;
 				cis1_info_buf[i] = ch;
