@@ -335,6 +335,7 @@ SUBDIR=	\
 	${_sdhci_acpi} \
 	sdhci_pci \
 	sdio \
+	sdiobridge \
 	sem \
 	send \
 	${_sf} \
