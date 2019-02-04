@@ -237,9 +237,9 @@ sdio_func_read_cis(union ccb *ccb, uint8_t func_number, uint32_t cis_addr,
 
 			break;
 		default:
-			warnx("%s: func_number %d tuple %d ID %#02x len %#02x\n",
-			    __func__, func_number, tuple_count, tuple_id,
-			    tuple_len);
+			warnx("%s: Skipping func_number %d tuple %d ID %#02x "
+			    "len %#02x\n", __func__, func_number, tuple_count,
+			    tuple_id, tuple_len);
 		}
 		if (tuple_len == 0xff) {
 			/* Also marks the end of a tuple chain (E1 16.2) */
