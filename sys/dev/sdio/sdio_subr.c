@@ -80,11 +80,11 @@ static int
 sdioerror(union ccb *ccb, u_int32_t cam_flags, u_int32_t sense_flags)
 {
 
-	return(cam_periph_error(ccb, cam_flags, sense_flags, NULL));
+	return(cam_periph_error(ccb, cam_flags, sense_flags));
 }
 
 /* CMD52: direct byte access */
-int
+static int
 sdio_rw_direct(union ccb *ccb, uint8_t func_number, uint32_t addr,
     bool is_write, uint8_t *data, uint8_t *resp)
 {
@@ -219,7 +219,7 @@ sdio_func_read_cis(union ccb *ccb, uint8_t func_number, uint32_t cis_addr,
 				break;
 			}
 			/* TPLFE_TYPE (Extended Data) */
-			v = sdio_read_1(dev, 0, addr++, &ret);
+			v = sdio_read_1(ccb, 0, addr++, &ret);
 			ERR_OUT(ret);
 			if (func_number == 0) {
 				if (v != 0x00)
@@ -241,7 +241,7 @@ sdio_func_read_cis(union ccb *ccb, uint8_t func_number, uint32_t cis_addr,
 			    __func__, func_number, tuple_count, tuple_id,
 			    tuple_len);
 		}
-		if (tuple_len = 0xff) {
+		if (tuple_len == 0xff) {
 			/* Also marks the end of a tuple chain (E1 16.2) */
 			/* The tuple is valid, hence this going at the end. */
 			break;
