@@ -398,7 +398,7 @@ struct sdhci_slot {
 
 #ifdef MMCCAM
 	/* CAM stuff */
-	union ccb	*ccb;
+	union ccb		*ccb;
 	struct cam_devq		*devq;
 	struct cam_sim		*sim;
 	struct mtx		sim_mtx;
