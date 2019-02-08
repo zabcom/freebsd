@@ -109,7 +109,7 @@ struct cam_sim {
 	struct callout		callout;
 	struct cam_devq 	*devq;	/* Device Queue to use for this SIM */
 	int			refcount; /* References to the SIM. */
-	device_t		parent_dev; /* To export to attached peripherals */
+	device_t		sim_dev; /* For attached peripherals. */
 };
 
 #define CAM_SIM_LOCK(sim)	mtx_lock((sim)->mtx)
