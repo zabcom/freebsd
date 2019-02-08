@@ -78,8 +78,7 @@ struct sdiob_softc {
 	uint32_t			nb_state;
 #define	NB_STATE_DEAD			0x0001
 #define	NB_STATE_SIM_ADDED		0x0002
-#define	NB_STATE_PROBE_AND_ATTACH	0x0004
-
+#define	NB_STATE_READY			0x0004
 
 	/* CAM side (including sim_dev). */
 	struct card_info		cardinfo;
@@ -93,45 +92,11 @@ struct sdiob_softc {
 
 /* -------------------------------------------------------------------------- */
 
-static void __inline
-_sdio_printf_dev(device_t dev, int error, const char *_f)
-{
-	driver_t *dd, *pd;
-	device_t pdev;
-	devclass_t dc, pdc;
-
-	pdev = device_get_parent(dev);
-
-	dd = device_get_driver(dev);
-	pd = device_get_driver(pdev);
-	dc = device_get_devclass(dev);
-	pdc = device_get_devclass(pdev);
-#define DRIVERNAME(d)     ((d)? d->name : "no driver")
-	printf("XXX-BZ %s: error %d dev %p\n"
-	    "\tdev    %s (%s) driver %p %s softc %p dc %p %s state %s/%s/%s\n"
-	    "\tparent %s (%s) driver %p %s softc %p dc %p %s state %s/%s/%s\n", _f, error, dev,
-		device_get_nameunit(dev), device_get_desc(dev), dd, DRIVERNAME(dd), device_get_softc(dev),
-		dc, devclass_get_name(dc),
-		device_is_alive(dev) ? "a" : "-", device_is_attached(dev) ? "a" : "-", device_is_enabled(dev) ? "e" : "-",
-
-		device_get_nameunit(pdev), device_get_desc(pdev), pd, DRIVERNAME(pd), device_get_softc(pdev),
-		pdc, devclass_get_name(pdc),
-		device_is_alive(pdev) ? "a" : "-", device_is_attached(pdev) ? "a" : "-", device_is_enabled(pdev) ? "e" : "-"
-		);
-
-	return;
-}
-
-/* -------------------------------------------------------------------------- */
-
 static int
 sdiob_probe(device_t dev)
 {
 
-	device_printf(dev, "%s:%d\n", __func__, __LINE__);
 	device_set_desc(dev, "SDIO CAM-Newbus bridge");
-	_sdio_printf_dev(dev, 0, __func__);
-	
 	return (BUS_PROBE_DEFAULT);
 }
 
@@ -141,28 +106,25 @@ sdiob_attach(device_t dev)
 	struct sdiob_softc *sc;
 	int error;
 
-	device_printf(dev, "%s:%d\n", __func__, __LINE__);
-	_sdio_printf_dev(dev, 0, __func__);
-
-	printf ("XXX-BZ TODO FIXME >>>> Do funny things here trying to find a child device...\n");
-#if 0
-	/* Locate our children */
-	bus_generic_probe(dev);
-
-	/* launch attachement of the added children */
-	bus_generic_attach(dev);
-#else
 	sc = device_get_softc(dev);
+	if (sc == NULL)
+		return (ENXIO);
 	sc->child = device_add_child(dev, NULL, -1);
-	if (sc->child == NULL)
+	if (sc->child == NULL) {
 		device_printf(dev, "%s: failed to add child\n", __func__);
-	else {
-		error = device_probe_and_attach(sc->child);
-		if (error != 0)
-			device_printf(dev, "%s: device_probe_and_attach(%p %s) failed %d\n", __func__, sc->child,  device_get_nameunit(sc->child), error);
+		return (ENXIO);
 	}
-#endif
-	printf ("XXX-BZ TODO FIXME <<<< Done funny things here trying to find a child device...\n");
+	error = device_probe_and_attach(sc->child);
+	if (error != 0) {
+		device_printf(dev, "%s: device_probe_and_attach(%p %s) "
+		    "failed %d\n", __func__, sc->child,
+		    device_get_nameunit(sc->child), error);
+		if (device_delete_child(dev, sc->child) == 0)
+			sc->child = NULL;
+		return (ENXIO);
+	}
+
+	sc->nb_state = NB_STATE_READY;
 
 	return (0);
 }
@@ -171,30 +133,9 @@ static int
 sdiob_detach(device_t dev)
 {
 
-	device_printf(dev, "%s:%d\n", __func__, __LINE__);
-	_sdio_printf_dev(dev, 0, __func__);
+	panic("XXX-BZ TODO\n");
 	return (0);
 }
-
-static device_t
-sdiob_add_child(device_t dev, u_int order, const char *name, int unit)
-{
-	device_t pdev;
-
-	pdev = device_get_parent(dev);
-	printf("XXX-BZ %s:%d dev %p %s pdev %p %s\n", __func__, __LINE__, dev, device_get_nameunit(dev), pdev, device_get_nameunit(pdev));
-	return (bus_generic_add_child(dev, order, name, unit));
-}
-
-static void
-sdiob_driver_added(device_t dev, driver_t *driver)
-{
-
-	printf("%s:%d driver %p dev %p %s\n", __func__, __LINE__, driver, dev, device_get_nameunit(dev));
-	bus_generic_driver_added(dev, driver);
-}
-
-
 
 static device_method_t sdiob_methods[] = {
 
@@ -204,8 +145,8 @@ static device_method_t sdiob_methods[] = {
 	DEVMETHOD(device_detach,	sdiob_detach),
 
 	/* Bus interface. */
-	DEVMETHOD(bus_add_child,	sdiob_add_child),
-	DEVMETHOD(bus_driver_added,	sdiob_driver_added),
+	DEVMETHOD(bus_add_child,	bus_generic_add_child),
+	DEVMETHOD(bus_driver_added,	bus_generic_driver_added),
 
 	DEVMETHOD_END
 };
@@ -218,29 +159,6 @@ static driver_t sdiob_driver = {
 };
 
 /* -------------------------------------------------------------------------- */
-
-static int
-sdio_newbus_probe_attach(struct sdiob_softc *sc)
-{
-	int error;
-
-	_sdio_printf_dev(sc->dev, __LINE__, __func__);
-#if 1
-	/* Probe and attach a child if there is one. */
-	mtx_lock(&Giant);
-	error = device_probe_and_attach(sc->dev);
-	mtx_unlock(&Giant);
-#else
-	error = 0;
-#endif
-	_sdio_printf_dev(sc->dev, error, __func__);
-	if (error != 0)
-		return (error);
-
-	sc->nb_state = NB_STATE_PROBE_AND_ATTACH;
-
-	return (error);
-}
 
 static int
 sdio_newbus_sim_add(struct sdiob_softc *sc)
@@ -266,8 +184,6 @@ sdio_newbus_sim_add(struct sdiob_softc *sc)
 	 * device_probe_child() -> device_set_driver() will nuke it again.
 	 */
 	/* XXX-BZ ivars */
-printf("%s:%d sc %p sc->dev %p\n", __func__, __LINE__, sc, sc->dev);
-	_sdio_printf_dev(sc->dev, __LINE__, __func__);
 
 	pdev = device_get_parent(sc->dev);
 	KASSERT(pdev != NULL, ("%s: sc %p dev %p (%s) parent is NULL\n",
@@ -292,8 +208,7 @@ printf("%s:%d sc %p sc->dev %p\n", __func__, __LINE__, sc, sc->dev);
 	/* Done. */
 	sc->nb_state = NB_STATE_SIM_ADDED;
 
-	error = sdio_newbus_probe_attach(sc);
-	return (error);
+	return (0);
 }
 
 static void

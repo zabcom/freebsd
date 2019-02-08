@@ -54,34 +54,12 @@ __FBSDID("$FreeBSD$");
 
 #define	SDIOBTEST_NAME_S		"sdiobtest"
 
-static void
-sdiobtest_identify(driver_t *driver, device_t parent)
-{
-#if 0
-	device_t dev;
-#endif
-
-	printf("%s:%d driver %p parent %p %s\n", __func__, __LINE__, driver, parent, device_get_nameunit(parent));
-
-#if 0
-	if (device_find_child(parent, SDIOBTEST_NAME_S, -1) != NULL)
-		return;
-	dev = BUS_ADD_CHILD(parent, 0, SDIOBTEST_NAME_S, -1);
-	if (dev == NULL)
-		device_printf(parent, "%s: failed to add child %s\n", __func__, SDIOBTEST_NAME_S);
-
-	printf("%s:%d driver %p parent %p %s dev %p ready to trock\n", __func__, __LINE__, driver, parent, device_get_nameunit(parent), dev);
-#endif
-}
-
-
 static int
 sdiobtest_probe(device_t dev)
 {
 
 	device_printf(dev, "%s:%d\n", __func__, __LINE__);
-	device_set_desc(dev, "TA TAA");
-	
+	device_set_desc(dev, "SDIOBTEST SUCCESS");
 	return (BUS_PROBE_DEFAULT);
 }
 
@@ -101,24 +79,14 @@ sdiobtest_detach(device_t dev)
 	return (0);
 }
 
-static void
-sdiobtest_driver_added(device_t dev, driver_t *driver)
-{
-
-	printf("%s:%d driver %p dev %p %s\n", __func__, __LINE__, driver, dev, device_get_nameunit(dev));
-	bus_generic_driver_added(dev, driver);
-}
-
 static device_method_t sdiobtest_methods[] = {
 
 	/* Device interface. */
-	DEVMETHOD(device_identify,	sdiobtest_identify),
 	DEVMETHOD(device_probe,		sdiobtest_probe),
 	DEVMETHOD(device_attach,	sdiobtest_attach),
 	DEVMETHOD(device_detach,	sdiobtest_detach),
 
 	/* Bus interface. */
-	DEVMETHOD(bus_driver_added,	sdiobtest_driver_added),
 
 	DEVMETHOD_END
 };
@@ -133,3 +101,4 @@ static driver_t sdiobtest_driver = {
 DRIVER_MODULE(sdiobtest, SDIOB_NAME, sdiobtest_driver, sdiobtest_devclass,
     NULL, NULL);
 MODULE_DEPEND(sdiobtest, sdiobridge, 1, 1, 1);
+/* XXX-BZ MODULE_DEPEND stringifies the defined name, can't use SDIOB_NAME :( */
