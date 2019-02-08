@@ -336,6 +336,7 @@ SUBDIR=	\
 	sdhci_pci \
 	sdio \
 	sdiobridge \
+	sdiobridgetest \
 	sem \
 	send \
 	${_sf} \
