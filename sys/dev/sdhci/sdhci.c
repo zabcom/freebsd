@@ -2440,6 +2440,7 @@ sdhci_start_slot(struct sdhci_slot *slot)
         }
 
         mtx_lock(&slot->sim_mtx);
+	slot->sim->sim_dev = slot->dev;
         if (xpt_bus_register(slot->sim, slot->bus, 0) != 0) {
                 slot_printf(slot,
                               "cannot register SCSI pass-through bus\n");

@@ -258,6 +258,7 @@ bcm_sdhci_attach(device_t dev)
 	bus_generic_probe(dev);
 	bus_generic_attach(dev);
 
+	sc->sc_slot.dev = dev;	/* For sim_dev. */
 	sdhci_start_slot(&sc->sc_slot);
 
 	return (0);
@@ -648,6 +649,7 @@ static device_method_t bcm_sdhci_methods[] = {
 	/* Bus interface */
 	DEVMETHOD(bus_read_ivar,	sdhci_generic_read_ivar),
 	DEVMETHOD(bus_write_ivar,	sdhci_generic_write_ivar),
+	DEVMETHOD(bus_add_child,	bus_generic_add_child),
 
 	/* MMC bridge interface */
 	DEVMETHOD(mmcbr_update_ios,	sdhci_generic_update_ios),

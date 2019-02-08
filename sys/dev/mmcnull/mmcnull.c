@@ -126,7 +126,7 @@ mmcnull_attach(device_t dev)
 	 * will be a good start, since it will be possible to call
 	 * device_get_parent() and device_get_unit() inside cam_sim_alloc().
 	 */
-	sc->sim->parent_dev = dev;
+	sc->sim->sim_dev = dev;
 
 	if (sc->sim == NULL) {
 		cam_simq_free(sc->devq);
