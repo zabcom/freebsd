@@ -332,7 +332,7 @@ sdio_start_init_task(void *context, int pending)
 	 * we know VID/PID of all the functions on the card.
 	 * Time to hook into the newbus.
 	 */
-	sdio_real_identify(&sdio_driver, periph->sim->parent_dev, softc);
+	sdio_real_identify(&sdio_driver, periph->sim->sim_dev, softc);
 }
 
 static void
